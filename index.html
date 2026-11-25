@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mail CSK</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,"Segoe UI",sans-serif;color:#241c15;background:#f4f4f2}
+#app{display:flex;min-height:100vh}aside{width:210px;background:#241c15;color:#fff;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column}
+aside h1{font-size:18px;margin:0 18px 18px}aside a{display:block;padding:10px 18px;color:#ddd;cursor:pointer}aside a.on{background:#ffe01b;color:#241c15;font-weight:600}
+.me{margin-top:auto;padding:14px 18px;font-size:12px;color:#bbb;word-break:break-all}
+main{flex:1;padding:24px;max-width:1150px;min-width:0}h2{margin:0 0 14px}.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px #0002}
+input,select,textarea{font:inherit;padding:7px 9px;border:1px solid #bbb;border-radius:4px;margin:2px 0;max-width:100%}textarea{width:100%}
+button{font:inherit;font-weight:600;padding:8px 14px;border:0;border-radius:4px;background:#ffe01b;color:#241c15;cursor:pointer}button.g{background:#e4e4e0}
+table{width:100%;border-collapse:collapse;background:#fff}td,th{padding:7px 10px;border-bottom:1px solid #eee;text-align:left}th{background:#fafaf8}
+.m{color:#777;font-size:12px}.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:300px}
+iframe{width:100%;height:480px;border:1px solid #ccc;background:#fff;border-radius:4px}
+pre{background:#241c15;color:#9fe;padding:10px;border-radius:6px;max-height:200px;overflow:auto;white-space:pre-wrap}
+.blk{border:1px solid #ddd;border-radius:6px;padding:8px;margin:8px 0}.bh{display:flex;justify-content:space-between;align-items:center}
+.bh button{padding:2px 8px}.login{max-width:440px;margin:12vh auto;text-align:center}.login .card{padding:28px}
+@media(max-width:700px){#app{flex-direction:column}aside{width:100%;flex-direction:row;flex-wrap:wrap;padding:8px}aside h1{margin:0 12px}.me{display:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// Nếu muốn, dán sẵn OAuth Client ID vào đây. Để trống thì trang sẽ hỏi lần đầu.
+const CID_DEFAULT = "";
+const SCOPE = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const getCid = () => CID_DEFAULT || localStorage.csk_cid || "";
+let U, D, TOK, EXP = 0, client, tab = "contacts", RUN = 0, STOP = 0, cur = {list: "", cid: "", edit: null};
+const save = () => localStorage["csk:" + U.email] = JSON.stringify(D);
+const E = () => cur.edit;
+
+/* ---------- Đăng nhập Google ---------- */
+function loginView() {
+  if (!getCid()) return `<div class=login><div class=card><h2>Thiết lập lần đầu</h2>
+    <p>Dán <b>OAuth Client ID</b> của Google (xem hướng dẫn tạo ở cuối tài liệu hướng dẫn).</p>
+    <input id=cid style="width:100%" placeholder="xxxx.apps.googleusercontent.com"><p><button onclick="localStorage.csk_cid=$('#cid').value.trim();boot()">Lưu</button></p></div></div>`;
+  return `<div class=login><div class=card><h2>Mail CSK</h2><p>Gửi mail hàng loạt từ tài khoản Google của bạn.</p>
+    <button onclick=login() style="padding:12px 22px">Đăng nhập bằng Google</button>
+    <p class=m><a href="#" onclick="delete localStorage.csk_cid;boot();return false">Đổi Client ID</a></p></div></div>`;
+}
+function getTok(prompt = "") {
+  return new Promise((res, rej) => {
+    if (TOK && Date.now() < EXP - 60000) return res(TOK);
+    client.callback = r => { if (r.error) return rej(new Error(r.error_description || r.error)); TOK = r.access_token; EXP = Date.now() + r.expires_in * 1000; res(TOK); };
+    client.error_callback = e => rej(new Error(e.type || "Cửa sổ đăng nhập bị chặn"));
+    client.requestAccessToken({prompt});
+  });
+}
+async function login() {
+  if (!window.google) return alert("Google chưa tải xong, thử lại sau vài giây.");
+  client = google.accounts.oauth2.initTokenClient({client_id: getCid(), scope: SCOPE, callback: () => {}});
+  try {
+    await getTok("select_account");
+    const p = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}})).json();
+    U = {email: p.email, name: p.name || p.email};
+    D = Object.assign({contacts: [], camps: [], sent: [], track: "", set: {batch: 150, delay: 3, cap: 2000}}, JSON.parse(localStorage["csk:" + U.email] || "{}"));
+    shell();
+  } catch (e) { alert("Đăng nhập lỗi: " + e.message); }
+}
+function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); TOK = null; U = null; boot(); }
+function boot() { $("#app").innerHTML = loginView(); }
+
+/* ---------- Khung chính ---------- */
+function shell() {
+  $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>Liên hệ</a><a data-t=camps>Chiến dịch</a><a data-t=history>Lịch sử</a>
+    <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a></div></aside><main id=v></main>`;
+  document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
+  go("contacts");
+}
+function go(t) {
+  tab = t || tab;
+  document.querySelectorAll("aside a[data-t]").forEach(a => a.className = a.dataset.t == tab ? "on" : "");
+  $("#v").innerHTML = {contacts: vContacts, camps: vCamps, history: vHist}[tab]();
+  if (cur.edit && tab == "camps") upd(true);
+}
+
+/* ---------- Liên hệ ---------- */
+const lists = () => [...new Set(D.contacts.map(c => c.list))];
+function vContacts() {
+  const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
+  return `<h2>Liên hệ</h2><div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(cột A: email, cột B: tên)</span><br>
+    <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
+    <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
+    <p class=m>Hiển thị tối đa 300 dòng.</p><table><tr><th>Email<th>Tên<th>Danh sách<th>Trạng thái<th></tr>
+    ${r.slice(0, 300).map(c => `<tr><td>${esc(c.email)}<td>${esc(c.name)}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}
+    <td><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button></tr>`).join("")}</table>`;
+}
+function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; save(); go(); }
+async function imp() {
+  const f = $("#fi").files[0], list = $("#ln").value.trim() || "Chung";
+  if (!f) return alert("Chọn file trước.");
+  const wb = f.name.toLowerCase().endsWith(".csv") ? XLSX.read(await f.text(), {type: "string"}) : XLSX.read(await f.arrayBuffer());
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: false});
+  const have = new Set(D.contacts.filter(c => c.list == list).map(c => c.email));
+  let add = 0, dup = 0, bad = 0;
+  for (const r of rows) {
+    const e = String(r[0] ?? "").trim().toLowerCase();
+    if (!e) continue;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { if (e.includes("@")) bad++; continue; }
+    if (have.has(e)) { dup++; continue; }
+    have.add(e); D.contacts.push({id: uid(), email: e, name: String(r[1] ?? "").trim(), list}); add++;
+  }
+  save(); cur.list = list; alert(`Đã thêm ${add}, trùng ${dup}, email sai ${bad}.`); go();
+}
+
+/* ---------- Trình soạn thư theo khối ---------- */
+const LBL = {h: "Tiêu đề", p: "Đoạn văn", img: "Ảnh (dán link ảnh)", btn: "Nút bấm", hr: "Đường kẻ"};
+function html(blocks) {
+  const body = blocks.map(b => ({
+    h: `<h2 style="margin:0 0 12px;font-size:22px">${b.v}</h2>`,
+    p: `<p style="margin:0 0 14px;line-height:1.6">${String(b.v).replace(/\n/g, "<br>")}</p>`,
+    img: b.v ? `<img src="${esc(b.v)}" style="max-width:100%;display:block;margin:0 0 14px" alt="">` : "",
+    btn: `<p style="margin:0 0 14px"><a href="${esc(b.u || "#")}" style="background:#ffe01b;color:#241c15;padding:12px 22px;text-decoration:none;border-radius:4px;font-weight:bold;display:inline-block">${b.v}</a></p>`,
+    hr: `<hr style="border:0;border-top:1px solid #ddd;margin:18px 0">`}[b.t])).join("");
+  return `<div style="background:#f4f4f2;padding:20px"><div style="max-width:600px;margin:auto;background:#fff;padding:28px;font-family:Arial,sans-serif;color:#241c15">${body}</div></div>`;
+}
+const blk = () => E().blocks.map((b, i) => `<div class=blk><div class=bh><b>${LBL[b.t]}</b><span><button class=g onclick=mv(${i},-1)>↑</button> <button class=g onclick=mv(${i},1)>↓</button> <button class=g onclick=rm(${i})>✕</button></span></div>
+  ${b.t == "hr" ? "" : `<textarea rows=${b.t == "p" ? 4 : 1} oninput="E().blocks[${i}].v=this.value;upd()">${esc(b.v)}</textarea>`}
+  ${b.t == "btn" ? `<input style="width:100%" placeholder="Link của nút (https://...)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">` : ""}</div>`).join("");
+const add = t => { E().blocks.push({t, v: t == "h" ? "Tiêu đề" : t == "p" ? "Nội dung..." : t == "btn" ? "Xem chi tiết" : "", u: ""}); save(); go(); };
+const mv = (i, d) => { const a = E().blocks, j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; save(); go(); };
+const rm = i => { E().blocks.splice(i, 1); save(); go(); };
+function upd(init) { if (!init) save(); const f = $("#pf"); if (f) f.srcdoc = html(E().blocks).replace(/{{ten}}/g, "Nguyễn Văn A"); }
+function newCamp() { cur.edit = {id: uid(), name: "Chiến dịch mới", subject: "", list: "", blocks: [{t: "h", v: "Xin chào {{ten}},", u: ""}, {t: "p", v: "Nội dung thư...", u: ""}]}; D.camps.unshift(cur.edit); save(); go(); }
+const editC = id => { cur.edit = D.camps.find(c => c.id == id); go(); };
+function delC(id) { if (!confirm("Xóa chiến dịch này?")) return; D.camps = D.camps.filter(c => c.id != id); if (cur.edit?.id == id) cur.edit = null; save(); go(); }
+
+function vCamps() {
+  const s = D.set, ed = cur.edit;
+  return `<h2>Chiến dịch</h2><div class=card><b>Thiết lập gửi</b><br>Mỗi lô <input type=number value=${s.batch} style="width:70px" onchange="D.set.batch=+this.value;save()"> mail,
+    nghỉ <input type=number value=${s.delay} style="width:55px" onchange="D.set.delay=+this.value;save()"> phút, tối đa/ngày <input type=number value=${s.cap} style="width:75px" onchange="D.set.cap=+this.value;save()">
+    <div class=m>Hôm nay đã gửi: <b>${usedToday()}</b> mail. Giữ tab này mở trong lúc gửi.</div></div>
+    <p><button onclick=newCamp()>+ Tạo chiến dịch</button></p>
+    <table><tr><th>Chiến dịch<th>Danh sách<th>Đã gửi<th>Lỗi<th></tr>${D.camps.map(c => `<tr><td>${esc(c.name)}<td>${esc(c.list || "Tất cả")}
+    <td>${D.sent.filter(x => x.cid == c.id && x.ok).length}<td>${D.sent.filter(x => x.cid == c.id && !x.ok).length}
+    <td><button class=g onclick="editC('${c.id}')">Sửa</button> <button onclick="run('${c.id}')">Gửi / Tiếp tục</button> <button class=g onclick="delC('${c.id}')">Xóa</button></tr>`).join("")}</table>
+    <p><button class=g onclick="STOP=1">Dừng gửi</button></p><pre id=log>${esc(LOG.join("\n")) || "Chưa chạy."}</pre>
+    ${ed ? `<div class=card><div class=row><div><b>Soạn chiến dịch</b><br>
+    <input style="width:100%" placeholder="Tên chiến dịch" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
+    <input style="width:100%" placeholder="Tiêu đề thư" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
+    <select style="width:100%" onchange="E().list=this.value;save()"><option value="">Gửi tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+    ${blk()}<p>${Object.keys(LBL).map(t => `<button class=g onclick="add('${t}')">+ ${LBL[t].split(" ")[0]}</button>`).join(" ")}</p>
+    <button onclick=test()>Gửi thử cho tôi</button></div><div><b>Xem trước</b> <span class=m>({{ten}} sẽ được thay bằng tên người nhận)</span><iframe id=pf></iframe></div></div></div>` : ""}`;
+}
+
+/* ---------- Gửi mail qua Gmail API ---------- */
+const u8 = s => { const a = new TextEncoder().encode(s); let b = ""; for (let i = 0; i < a.length; i++) b += String.fromCharCode(a[i]); return btoa(b); };
+const b64url = s => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const hdr = s => "=?UTF-8?B?" + u8(s) + "?=";
+function mime(to, name, subj, body) {
+  return b64url(u8([`From: ${hdr(U.name)} <${U.email}>`, `To: ${name ? hdr(name) + " " : ""}<${to}>`, `Subject: ${hdr(subj)}`, "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", u8(body).replace(/(.{76})/g, "$1\r\n")].join("\r\n")));
+}
+async function gsend(raw) {
+  const t = await getTok(), r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    {method: "POST", headers: {Authorization: "Bearer " + t, "Content-Type": "application/json"}, body: JSON.stringify({raw})});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || "HTTP " + r.status);
+}
+function personal(c, x, tok) {
+  const nm = esc(x.name) || "bạn";
+  let h = html(c.blocks).replace(/{{ten}}/g, nm);
+  if (D.track) { const b = D.track.replace(/\/$/, ""); h = h.replace(/href="(https?:[^"]+)"/g, (m, u) => `href="${b}/c?t=${tok}&u=${encodeURIComponent(u)}"`) + `<img src="${b}/o?t=${tok}" width="1" height="1" alt="">`; }
+  return [(c.subject || "(Không tiêu đề)").replace(/{{ten}}/g, x.name || "bạn"), h];
+}
+async function test() {
+  const c = E(); if (!c.subject) return alert("Nhập tiêu đề trước.");
+  try { const [s, h] = personal(c, {name: "Thử nghiệm"}, "test"); await gsend(mime(U.email, "", s, h)); alert("Đã gửi thử vào hộp thư của bạn."); }
+  catch (e) { alert("Lỗi: " + e.message); }
+}
+const today = () => new Date().toLocaleDateString("sv");
+const usedToday = () => D.sent.filter(s => s.ok && s.at.startsWith(today())).length;
+let LOG = [];
+const say = t => { LOG.push(new Date().toLocaleTimeString("vi") + "  " + t); const l = $("#log"); if (l) { l.textContent = LOG.join("\n"); l.scrollTop = 1e9; } };
+async function run(id) {
+  if (RUN) return alert("Đang có chiến dịch chạy.");
+  const c = D.camps.find(x => x.id == id); if (!c.subject) return alert("Chiến dịch chưa có tiêu đề.");
+  if (!confirm("Bắt đầu gửi chiến dịch \"" + c.name + "\"?")) return;
+  RUN = 1; STOP = 0; LOG = [];
+  const done = new Set(D.sent.filter(s => s.cid == id && s.ok).map(s => s.email)), seen = new Map();
+  D.contacts.filter(x => !x.unsub && (!c.list || x.list == c.list) && !done.has(x.email)).forEach(x => seen.has(x.email) || seen.set(x.email, x));
+  const room = Math.max(0, D.set.cap - usedToday()), todo = [...seen.values()].slice(0, room), size = Math.max(1, D.set.batch);
+  say(`Còn ${seen.size} người chưa gửi. Hôm nay còn được gửi ${room} mail.`);
+  let fails = 0;
+  try {
+    for (let i = 0; i < todo.length && !STOP && fails < 5; i += size) {
+      for (const x of todo.slice(i, i + size)) {
+        if (STOP) break;
+        const tok = uid() + uid(), [s, h] = personal(c, x, tok), rec = {cid: id, email: x.email, name: x.name, tok, at: new Date().toLocaleString("sv"), batch: i / size + 1};
+        try { await gsend(mime(x.email, x.name, s, h)); rec.ok = 1; fails = 0; } catch (e) { rec.ok = 0; rec.err = e.message; say(`Lỗi ${x.email}: ${e.message}`); if (++fails >= 5) { say("Lỗi liên tiếp 5 lần, dừng lại."); break; } }
+        D.sent.push(rec); save(); await sleep(1000);
+      }
+      say(`Xong lô ${i / size + 1}.`);
+      if (i + size < todo.length && !STOP && fails < 5) { say(`Nghỉ ${D.set.delay} phút...`); for (let k = 0; k < D.set.delay * 60 && !STOP; k++) await sleep(1000); }
+    }
+  } catch (e) { say("LỖI: " + e.message); }
+  say(STOP ? "Đã dừng." : "Hoàn tất lượt gửi. Nếu còn người chưa gửi, bấm Gửi / Tiếp tục vào ngày mai.");
+  RUN = 0; if (tab == "camps") go();
+}
+
+/* ---------- Lịch sử ---------- */
+function vHist() {
+  const r = D.sent.filter(s => !cur.cid || s.cid == cur.cid).slice().reverse();
+  const nm = id => D.camps.find(c => c.id == id)?.name || "(đã xóa)";
+  return `<h2>Lịch sử</h2><div class=card><select onchange="cur.cid=this.value;go()"><option value="">Tất cả chiến dịch</option>${D.camps.map(c => `<option value=${c.id} ${c.id == cur.cid ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+    <button onclick=exp()>Xuất Excel</button> <button class=g onclick=sync()>Đồng bộ lượt mở</button><br>
+    <input style="width:100%;margin-top:8px" placeholder="Địa chỉ máy chủ theo dõi (tùy chọn, để biết ai đã mở)" value="${esc(D.track)}" onchange="D.track=this.value.trim();save()">
+    <div class=m>Hiển thị 500 dòng mới nhất; file Excel có toàn bộ.</div></div>
+    <table><tr><th>Email<th>Tên<th>Chiến dịch<th>Trạng thái<th>Thời gian gửi<th>Lô<th>Đã mở</tr>${r.slice(0, 500).map(s => `<tr><td>${esc(s.email)}<td>${esc(s.name)}<td>${esc(nm(s.cid))}
+    <td>${s.ok ? "Đã gửi" : "Lỗi: " + esc(s.err)}<td>${esc(s.at)}<td>${s.batch}<td>${esc(s.open || "-")}</tr>`).join("")}</table>`;
+}
+function exp() {
+  const nm = id => D.camps.find(c => c.id == id)?.name || "(đã xóa)";
+  const rows = D.sent.map(s => ({"Chiến dịch": nm(s.cid), Email: s.email, "Tên": s.name, "Trạng thái": s.ok ? "Đã gửi" : "Lỗi", "Lỗi": s.err || "", "Thời gian gửi": s.at, "Lô": s.batch, "Thời gian mở": s.open || ""}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lịch sử"); XLSX.writeFile(wb, "lich_su_gui_mail.xlsx");
+}
+async function sync() {
+  if (!D.track) return alert("Chưa có máy chủ theo dõi. Mục này sẽ dùng được sau khi dựng máy chủ nhận lượt mở.");
+  try {
+    const o = await (await fetch(D.track.replace(/\/$/, "") + "/opens")).json(); let n = 0;
+    D.sent.forEach(s => { if (o[s.tok] && !s.open) { s.open = o[s.tok]; n++; } }); save(); alert(`Cập nhật ${n} lượt mở mới.`); go();
+  } catch (e) { alert("Không đọc được dữ liệu theo dõi: " + e.message); }
+}
+boot();
+</script>
+</body>
+</html>
