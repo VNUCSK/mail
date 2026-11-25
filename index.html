@@ -11,22 +11,26 @@
 #app{display:flex;min-height:100vh}aside{width:210px;background:#241c15;color:#fff;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column}
 aside h1{font-size:18px;margin:0 18px 18px}aside a{display:block;padding:10px 18px;color:#ddd;cursor:pointer}aside a.on{background:#ffe01b;color:#241c15;font-weight:600}
 .me{margin-top:auto;padding:14px 18px;font-size:12px;color:#bbb;word-break:break-all}
-main{flex:1;padding:24px;max-width:1150px;min-width:0}h2{margin:0 0 14px}.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px #0002}
+main{flex:1;padding:24px;max-width:1250px;min-width:0}h2{margin:0 0 14px}.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px #0002}
 input,select,textarea{font:inherit;padding:7px 9px;border:1px solid #bbb;border-radius:4px;margin:2px 0;max-width:100%}textarea{width:100%}
+input[type=color]{padding:0;width:30px;height:28px;vertical-align:middle}
 button{font:inherit;font-weight:600;padding:8px 14px;border:0;border-radius:4px;background:#ffe01b;color:#241c15;cursor:pointer}button.g{background:#e4e4e0}
 table{width:100%;border-collapse:collapse;background:#fff}td,th{padding:7px 10px;border-bottom:1px solid #eee;text-align:left}th{background:#fafaf8}
-.m{color:#777;font-size:12px}.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:300px}
-iframe{width:100%;height:480px;border:1px solid #ccc;background:#fff;border-radius:4px}
+.m{color:#777;font-size:12px}.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:340px}
+iframe{width:100%;height:640px;border:1px solid #ccc;background:#fff;border-radius:4px}
 pre{background:#241c15;color:#9fe;padding:10px;border-radius:6px;max-height:200px;overflow:auto;white-space:pre-wrap}
-.blk{border:1px solid #ddd;border-radius:6px;padding:8px;margin:8px 0}.bh{display:flex;justify-content:space-between;align-items:center}
+.blk{border:1px solid #ddd;border-radius:6px;padding:8px;margin:8px 0;background:#fcfcfb}.bh{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .bh button{padding:2px 8px}.login{max-width:440px;margin:12vh auto;text-align:center}.login .card{padding:28px}
+.tb{position:sticky;top:0;z-index:5;background:#fff;border:1px solid #ddd;border-radius:6px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:6px}
+.tb button{padding:3px 9px;min-width:30px}.tb select{padding:3px;margin:0}
+.rt{min-height:70px;border:1px solid #ccc;border-radius:4px;padding:10px;outline:none;line-height:1.6}.rt:focus{border-color:#241c15}
+.dz{border:2px dashed #bbb;border-radius:8px;padding:14px;text-align:center;color:#777;cursor:pointer;margin:8px 0}.dz:hover{border-color:#241c15;color:#241c15}
 @media(max-width:700px){#app{flex-direction:column}aside{width:100%;flex-direction:row;flex-wrap:wrap;padding:8px}aside h1{margin:0 12px}.me{display:none}}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
-// Nếu muốn, dán sẵn OAuth Client ID vào đây. Để trống thì trang sẽ hỏi lần đầu.
 const CID_DEFAULT = "484812261158-a37b9kuotiv8ctj2b3fb8n0mfc9fjdg3.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 const $ = s => document.querySelector(s);
@@ -34,20 +38,28 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const getCid = () => CID_DEFAULT || localStorage.csk_cid || "";
-let U, D, TOK, EXP = 0, client, tab = "contacts", RUN = 0, STOP = 0, cur = {list: "", cid: "", edit: null};
+let U, D, TOK, EXP = 0, client, tab = "contacts", RUN = 0, STOP = 0, cur = {list: "", cid: "", edit: null}, IMG = {}, RT = null, RG = null;
 const save = () => localStorage["csk:" + U.email] = JSON.stringify(D);
 const E = () => cur.edit;
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => e.preventDefault());
+
+/* ---------- Kho ảnh/tệp (IndexedDB) ---------- */
+const idb = new Promise(r => { const q = indexedDB.open("csk", 1); q.onupgradeneeded = () => q.result.createObjectStore("f"); q.onsuccess = () => r(q.result); });
+const fput = async (k, v) => { const d = await idb; return new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").put(v, k); t.oncomplete = r; }); };
+const fget = async k => { const d = await idb; return new Promise(r => { const q = d.transaction("f").objectStore("f").get(k); q.onsuccess = () => r(q.result); }); };
+async function loadImg(id) { const r = await fget(id); if (r) IMG[id] = {url: URL.createObjectURL(r.blob), name: r.name}; }
+const preload = async c => { for (const b of c.blocks) if (b.t == "img" && b.v && !IMG[b.v]) await loadImg(b.v); };
 
 /* ---------- Đăng nhập Google ---------- */
 function loginView() {
   if (!getCid()) return `<div class=login><div class=card><h2>Thiết lập lần đầu</h2>
-    <p>Dán <b>OAuth Client ID</b> của Google (xem hướng dẫn tạo ở cuối tài liệu hướng dẫn).</p>
+    <p>Dán <b>OAuth Client ID</b> của Google.</p>
     <input id=cid style="width:100%" placeholder="xxxx.apps.googleusercontent.com"><p><button onclick="localStorage.csk_cid=$('#cid').value.trim();boot()">Lưu</button></p></div></div>`;
   return `<div class=login><div class=card><h2>Mail CSK</h2><p>Gửi mail hàng loạt từ tài khoản Google của bạn.</p>
     <button onclick=login() style="display:inline-flex;align-items:center;gap:10px;padding:10px 20px;background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:24px;font-weight:500">
-    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.2 5.5-4.7 7.2l7.6 5.9c4.4-4.1 6.9-10.1 6.9-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.100 15.9-5.800l-7.6-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>
-    Đăng nhập bằng Google</button>
-    </div></div>`;
+    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.2 5.5-4.7 7.2l7.6 5.900c4.400-4.100 6.900-10.100 6.900-17.600z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.100 15.900-5.800l-7.600-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>
+    Đăng nhập bằng Google</button></div></div>`;
 }
 function getTok(prompt = "") {
   return new Promise((res, rej) => {
@@ -65,7 +77,7 @@ async function login() {
     const p = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}})).json();
     U = {email: p.email, name: p.name || p.email};
     D = Object.assign({contacts: [], camps: [], sent: [], track: "", set: {batch: 150, delay: 3, cap: 2000}}, JSON.parse(localStorage["csk:" + U.email] || "{}"));
-    shell();
+    D.camps.forEach(fix); shell();
   } catch (e) { alert("Đăng nhập lỗi: " + e.message); }
 }
 function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); TOK = null; U = null; boot(); }
@@ -79,7 +91,7 @@ function shell() {
   go("contacts");
 }
 function go(t) {
-  tab = t || tab;
+  tab = t || tab; RT = null;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.className = a.dataset.t == tab ? "on" : "");
   $("#v").innerHTML = {contacts: vContacts, camps: vCamps, history: vHist}[tab]();
   if (cur.edit && tab == "camps") upd(true);
@@ -114,27 +126,127 @@ async function imp() {
   save(); cur.list = list; alert(`Đã thêm ${add}, trùng ${dup}, email sai ${bad}.`); go();
 }
 
-/* ---------- Trình soạn thư theo khối ---------- */
-const LBL = {h: "Tiêu đề", p: "Đoạn văn", img: "Ảnh (dán link ảnh)", btn: "Nút bấm", hr: "Đường kẻ"};
-function html(blocks) {
-  const body = blocks.map(b => ({
-    h: `<h2 style="margin:0 0 12px;font-size:22px">${b.v}</h2>`,
-    p: `<p style="margin:0 0 14px;line-height:1.6">${String(b.v).replace(/\n/g, "<br>")}</p>`,
-    img: b.v ? `<img src="${esc(b.v)}" style="max-width:100%;display:block;margin:0 0 14px" alt="">` : "",
-    btn: `<p style="margin:0 0 14px"><a href="${esc(b.u || "#")}" style="background:#ffe01b;color:#241c15;padding:12px 22px;text-decoration:none;border-radius:4px;font-weight:bold;display:inline-block">${b.v}</a></p>`,
-    hr: `<hr style="border:0;border-top:1px solid #ddd;margin:18px 0">`}[b.t])).join("");
-  return `<div style="background:#f4f4f2;padding:20px"><div style="max-width:600px;margin:auto;background:#fff;padding:28px;font-family:Arial,sans-serif;color:#241c15">${body}</div></div>`;
+/* ---------- Trình soạn thư ---------- */
+const LBL = {r: "Văn bản", img: "Ảnh", btn: "Nút bấm", hr: "Đường kẻ"};
+const THEME = {outer: "#f4f4f2", bg: "#ffffff", w: 640, font: "Arial, sans-serif", size: 15, color: "#222222"};
+function fix(c) {
+  c.theme = Object.assign({}, THEME, c.theme); c.files ??= []; c.mode ??= "one"; c.cc ??= ""; c.bcc ??= ""; c.grp ??= 50;
+  c.blocks = c.blocks.map(b => b.t == "h" ? {t: "r", v: `<div style="text-align:center"><b>${b.v}</b></div>`} : b.t == "p" ? {t: "r", v: String(b.v).replace(/\n/g, "<br>")} : b);
+  return c;
 }
-const blk = () => E().blocks.map((b, i) => `<div class=blk><div class=bh><b>${LBL[b.t]}</b><span><button class=g onclick=mv(${i},-1)>↑</button> <button class=g onclick=mv(${i},1)>↓</button> <button class=g onclick=rm(${i})>✕</button></span></div>
-  ${b.t == "hr" ? "" : `<textarea rows=${b.t == "p" ? 4 : 1} oninput="E().blocks[${i}].v=this.value;upd()">${esc(b.v)}</textarea>`}
-  ${b.t == "btn" ? `<input style="width:100%" placeholder="Link của nút (https://...)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">` : ""}</div>`).join("");
-const add = t => { E().blocks.push({t, v: t == "h" ? "Tiêu đề" : t == "p" ? "Nội dung..." : t == "btn" ? "Xem chi tiết" : "", u: ""}); save(); go(); };
+function html(c, mode) {
+  const T = c.theme;
+  const body = c.blocks.map(b => ({
+    r: `<div style="padding:${b.pad ?? 18}px 24px;${b.bg ? `background:${b.bg};` : ""}font-size:${T.size}px;line-height:1.6">${b.v}</div>`,
+    img: b.v ? (a => b.u ? `<a href="${esc(b.u)}">${a}</a>` : a)(`<img src="${mode == "mail" ? "cid:" + b.v + "@csk" : (IMG[b.v]?.url || "")}" width="${T.w}" style="display:block;width:100%;max-width:100%;height:auto;border:0" alt="">`) : "",
+    btn: `<div style="padding:10px 24px;text-align:center"><a href="${esc(b.u || "#")}" style="background:${b.bg || "#ffe01b"};color:${b.fg || "#241c15"};padding:12px 26px;text-decoration:none;border-radius:4px;font-weight:bold;display:inline-block">${esc(b.v)}</a></div>`,
+    hr: `<div style="padding:6px 24px"><hr style="border:0;border-top:1px solid #ccc;margin:0"></div>`}[b.t] || "")).join("");
+  return `<div style="background:${T.outer};padding:16px 8px"><div style="max-width:${T.w}px;margin:auto;background:${T.bg};font-family:${T.font};color:${T.color}">${body}</div></div>`;
+}
+/* Thanh công cụ định dạng giống Gmail */
+const tbtn = (c, l, v) => `<button class=g title="${c}" onmousedown="event.preventDefault()" onclick="fc('${c}'${v ? `,'${v}'` : ""})">${l}</button>`;
+const TB = `<div class=tb>${tbtn("undo", "↶")}${tbtn("redo", "↷")}
+  <select onchange="fc('fontName',this.value);this.selectedIndex=0"><option value="">Phông</option>${["Arial", "Tahoma", "Verdana", "Georgia", "Times New Roman", "Courier New"].map(f => `<option>${f}</option>`).join("")}</select>
+  <select onchange="fc('size',this.value);this.selectedIndex=0"><option value="">Cỡ</option>${[12, 14, 16, 18, 20, 24, 28, 32, 40].map(s => `<option>${s}</option>`).join("")}</select>
+  ${tbtn("bold", "<b>B</b>")}${tbtn("italic", "<i>I</i>")}${tbtn("underline", "<u>U</u>")}${tbtn("strikeThrough", "<s>S</s>")}
+  <span title="Màu chữ">A <input type=color value="#d90000" onchange="fc('foreColor',this.value)"></span>
+  <span title="Màu nền chữ">▮ <input type=color value="#ffff00" onchange="fc('hiliteColor',this.value)"></span>
+  ${tbtn("justifyLeft", "⬅")}${tbtn("justifyCenter", "↔")}${tbtn("justifyRight", "➡")}${tbtn("justifyFull", "☰")}
+  ${tbtn("insertUnorderedList", "• Dấu đầu dòng")}${tbtn("insertOrderedList", "1. Số")}${tbtn("outdent", "⇤")}${tbtn("indent", "⇥")}
+  <button class=g title="Gắn link vào chữ (Ctrl+K)" onmousedown="event.preventDefault()" onclick="lk()">🔗 Gắn link</button>${tbtn("unlink", "Bỏ link")}${tbtn("removeFormat", "Xóa định dạng")}</div>`;
+document.addEventListener("selectionchange", () => {
+  const s = getSelection(); if (!s.rangeCount) return;
+  const n = s.anchorNode?.nodeType == 3 ? s.anchorNode.parentElement : s.anchorNode, rt = n?.closest?.(".rt");
+  if (rt) { RT = rt; RG = s.getRangeAt(0).cloneRange(); }
+});
+function fc(cmd, val) {
+  if (!RT || !RT.isConnected) return alert("Bấm vào một khối văn bản và bôi đen chữ cần định dạng trước.");
+  if ((cmd == "fontName" || cmd == "size") && !val) return;
+  RT.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(RG);
+  document.execCommand("styleWithCSS", false, cmd != "size");
+  if (cmd == "size") {
+    document.execCommand("fontSize", false, 7);
+    RT.querySelectorAll('font[size="7"]').forEach(f => { const sp = document.createElement("span"); sp.style.fontSize = val + "px"; sp.innerHTML = f.innerHTML; f.replaceWith(sp); });
+  } else if (cmd == "createLink") { val = prompt("Dán link (https://...)"); if (!val) return; document.execCommand(cmd, false, val); }
+  else document.execCommand(cmd, false, val);
+  E().blocks[+RT.dataset.i].v = RT.innerHTML; upd();
+}
+/* Gắn link vào chữ (ví dụ "tại đây") */
+let LK = null;
+function lk() {
+  if (!RT || !RT.isConnected || !RG) return alert("Bấm vào khối văn bản trước. Bôi đen chữ cần gắn link (ví dụ \"tại đây\"), hoặc đặt con trỏ vào nơi muốn chèn.");
+  const rg = RG.cloneRange(), sel = rg.toString(), n = rg.commonAncestorContainer, el = n.nodeType == 3 ? n.parentElement : n, a = el.closest?.("a");
+  LK = {rg, sel, a: a && RT.contains(a) ? a : null, rt: RT};
+  $("#lkm")?.remove();
+  const d = document.createElement("div"); d.id = "lkm";
+  d.style.cssText = "position:fixed;inset:0;background:#0006;z-index:50;display:flex;align-items:center;justify-content:center";
+  d.innerHTML = `<div class=card style="width:min(420px,92vw);margin:0"><b>Gắn link vào chữ</b><br>
+    <span class=m>Chữ hiển thị (ví dụ: tại đây)</span><br><input id=lkt style="width:100%" value="${esc(LK.a ? LK.a.textContent : sel) || "tại đây"}">
+    <br><span class=m>Link sẽ mở khi bấm vào chữ</span><br><input id=lku style="width:100%" placeholder="https://..." value="${esc(LK.a ? LK.a.getAttribute("href") : "")}" onkeydown="if(event.key=='Enter')lkOk()">
+    <p><button onclick=lkOk()>Áp dụng</button> <button class=g onclick="$('#lkm').remove()">Hủy</button></p></div>`;
+  document.body.appendChild(d); (sel || LK.a ? $("#lku") : $("#lkt")).focus();
+}
+function lkOk() {
+  let u = $("#lku").value.trim(), t = $("#lkt").value.trim();
+  if (!u) return alert("Nhập link cần gắn.");
+  if (!/^(https?:|mailto:|tel:)/i.test(u)) u = /^[^@\s\/]+@[^@\s\/]+$/.test(u) ? "mailto:" + u : "https://" + u.replace(/^\/+/, "");
+  $("#lkm").remove();
+  const {rg, sel, a, rt} = LK; t ||= u;
+  rt.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+  const css = "color:#1a0dab;text-decoration:underline";
+  if (a) { a.setAttribute("href", u); a.setAttribute("style", css); if (t != a.textContent) a.textContent = t; }
+  else if (sel && t == sel) { document.execCommand("createLink", false, u); rt.querySelectorAll("a:not([style])").forEach(x => x.setAttribute("style", css)); }
+  else document.execCommand("insertHTML", false, `<a href="${esc(u)}" style="${css}">${esc(t)}</a>&nbsp;`);
+  E().blocks[+rt.dataset.i].v = rt.innerHTML; upd();
+}
+document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() == "k" && document.activeElement?.classList?.contains("rt")) { e.preventDefault(); lk(); } });
+const blk = () => E().blocks.map((b, i) => `<div class=blk ondragover="event.preventDefault()" ondrop="drop(event,${i + 1})"><div class=bh><b>${LBL[b.t]}</b><span>
+  ${b.t == "r" ? `Nền <input type=color value="${b.bg || "#ffffff"}" onchange="E().blocks[${i}].bg=this.value;go()"><button class=g onclick="E().blocks[${i}].bg='';save();go()">∅</button> ` : ""}
+  <button class=g onclick=mv(${i},-1)>↑</button> <button class=g onclick=mv(${i},1)>↓</button> <button class=g onclick=rm(${i})>✕</button></span></div>
+  ${b.t == "r" ? `<div class=rt contenteditable data-i=${i} style="background:${b.bg || "#fff"};font-family:${E().theme.font};font-size:${E().theme.size}px;color:${E().theme.color}" oninput="E().blocks[${i}].v=this.innerHTML;upd()" onpaste="pst(event,${i + 1})">${b.v}</div>`
+  : b.t == "img" ? `${IMG[b.v] ? `<img src="${IMG[b.v].url}" style="max-width:100%;max-height:150px;display:block">` : "(không đọc được ảnh)"}<input style="width:100%" placeholder="Link khi bấm vào ảnh (tùy chọn)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">`
+  : b.t == "btn" ? `<input style="width:100%" placeholder="Chữ trên nút" value="${esc(b.v)}" oninput="E().blocks[${i}].v=this.value;upd()"><input style="width:100%" placeholder="Link (https://...)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">
+    Nền nút <input type=color value="${b.bg || "#ffe01b"}" onchange="E().blocks[${i}].bg=this.value;upd()"> Chữ <input type=color value="${b.fg || "#241c15"}" onchange="E().blocks[${i}].fg=this.value;upd()">` : ""}</div>`).join("");
+const thm = () => {
+  const T = E().theme, c = (k, l) => `${l} <input type=color value="${T[k]}" onchange="E().theme.${k}=this.value;upd()">`;
+  return `<div class=m>${c("outer", "Nền ngoài")} ${c("bg", "Nền thư")} ${c("color", "Màu chữ")} Cỡ <input type=number style="width:56px" value=${T.size} onchange="E().theme.size=+this.value;go()">
+    Rộng <input type=number style="width:66px" value=${T.w} onchange="E().theme.w=+this.value;go()">
+    <select onchange="E().theme.font=this.value;go()">${["Arial, sans-serif", "Tahoma, sans-serif", "Verdana, sans-serif", "Georgia, serif", "'Times New Roman', serif"].map(f => `<option value="${f}" ${f == T.font ? "selected" : ""}>${f.split(",")[0].replace(/'/g, "")}</option>`).join("")}</select></div>`;
+};
+const fl = () => E().files.map((f, i) => `<div class=m>📎 ${esc(f.name)} (${Math.round(f.size / 1024)} KB) <a href="#" onclick="E().files.splice(${i},1);save();go();return false">xóa</a></div>`).join("")
+  + (E().files.reduce((a, f) => a + f.size, 0) > 2e6 ? `<div class=m style="color:#b00">Tệp đính kèm nặng sẽ làm gửi chậm, và tổng thư không được quá 25MB.</div>` : "");
+const add = t => { E().blocks.push({t, v: t == "r" ? "<div>Nội dung...</div>" : t == "btn" ? "Xem chi tiết" : "", u: ""}); save(); go(); };
 const mv = (i, d) => { const a = E().blocks, j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; save(); go(); };
 const rm = i => { E().blocks.splice(i, 1); save(); go(); };
-function upd(init) { if (!init) save(); const f = $("#pf"); if (f) f.srcdoc = html(E().blocks).replace(/{{ten}}/g, "Nguyễn Văn A"); }
-function newCamp() { cur.edit = {id: uid(), name: "Chiến dịch mới", subject: "", list: "", blocks: [{t: "h", v: "Xin chào {{ten}},", u: ""}, {t: "p", v: "Nội dung thư...", u: ""}]}; D.camps.unshift(cur.edit); save(); go(); }
-const editC = id => { cur.edit = D.camps.find(c => c.id == id); go(); };
+function upd(init) { if (!init) save(); const f = $("#pf"); if (f) f.srcdoc = html(E(), "preview").replace(/{{ten}}/g, "Nguyễn Văn A"); }
+function newCamp() {
+  cur.edit = fix({id: uid(), name: "Chiến dịch mới", subject: "", list: "", blocks: [{t: "r", v: '<div style="text-align:center"><b><span style="font-size:20px;color:#1f4fbf">TIÊU ĐỀ THƯ</span></b></div><div><br></div><div>Kính gửi: <b>{{ten}}</b>,</div><div><br></div><div>Nội dung thư...</div>'}]});
+  D.camps.unshift(cur.edit); save(); go();
+}
+async function editC(id) { cur.edit = D.camps.find(c => c.id == id); await preload(cur.edit); go(); }
 function delC(id) { if (!confirm("Xóa chiến dịch này?")) return; D.camps = D.camps.filter(c => c.id != id); if (cur.edit?.id == id) cur.edit = null; save(); go(); }
+
+/* Kéo thả ảnh/tệp từ máy tính */
+async function shrink(f) {
+  if (f.type == "image/gif" || f.size < 200000) return {blob: f, type: f.type, name: f.name};
+  const bm = await createImageBitmap(f), k = Math.min(1, 1400 / bm.width), cv = document.createElement("canvas");
+  cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
+  const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(bm, 0, 0, cv.width, cv.height);
+  return {blob: await new Promise(r => cv.toBlob(r, "image/jpeg", .85)), type: "image/jpeg", name: f.name};
+}
+async function addFiles(fs, at) {
+  at ??= E().blocks.length; document.body.style.cursor = "wait";
+  try {
+    for (const f of fs) {
+      const id = uid();
+      if (f.type.startsWith("image/")) { await fput(id, await shrink(f)); await loadImg(id); E().blocks.splice(at++, 0, {t: "img", v: id, u: ""}); }
+      else { await fput(id, {blob: f, type: f.type, name: f.name}); E().files.push({id, name: f.name, type: f.type, size: f.size}); }
+    }
+  } catch (e) { alert("Không thêm được: " + e.message); }
+  document.body.style.cursor = ""; save(); go();
+}
+function drop(e, at) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], at); }
+function pst(e, at) { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs, at); } }
 
 function vCamps() {
   const s = D.set, ed = cur.edit;
@@ -146,38 +258,64 @@ function vCamps() {
     <td>${D.sent.filter(x => x.cid == c.id && x.ok).length}<td>${D.sent.filter(x => x.cid == c.id && !x.ok).length}
     <td><button class=g onclick="editC('${c.id}')">Sửa</button> <button onclick="run('${c.id}')">Gửi / Tiếp tục</button> <button class=g onclick="delC('${c.id}')">Xóa</button></tr>`).join("")}</table>
     <p><button class=g onclick="STOP=1">Dừng gửi</button></p><pre id=log>${esc(LOG.join("\n")) || "Chưa chạy."}</pre>
-    ${ed ? `<div class=card><div class=row><div><b>Soạn chiến dịch</b><br>
+    ${ed ? `<div class=card><div class=row><div ondragover="event.preventDefault()" ondrop="drop(event)"><b>Soạn chiến dịch</b><br>
     <input style="width:100%" placeholder="Tên chiến dịch" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
     <input style="width:100%" placeholder="Tiêu đề thư" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
     <select style="width:100%" onchange="E().list=this.value;save()"><option value="">Gửi tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
-    ${blk()}<p>${Object.keys(LBL).map(t => `<button class=g onclick="add('${t}')">+ ${LBL[t].split(" ")[0]}</button>`).join(" ")}</p>
-    <button onclick=test()>Gửi thử cho tôi</button></div><div><b>Xem trước</b> <span class=m>({{ten}} sẽ được thay bằng tên người nhận)</span><iframe id=pf></iframe></div></div></div>` : ""}`;
+    <select style="width:100%" onchange="E().mode=this.value;save();go()">${[["one", "Gửi riêng: mỗi người một thư (To, có {{ten}})"], ["bcc", "Gửi chung: danh sách người nhận vào BCC (ẩn nhau)"], ["cc", "Gửi chung: danh sách người nhận vào CC (thấy nhau)"]].map(([v, l]) => `<option value=${v} ${v == ed.mode ? "selected" : ""}>${l}</option>`).join("")}</select>
+    ${ed.mode != "one" ? `<div class=m>Số người mỗi thư <input type=number min=1 max=100 style="width:70px" value=${ed.grp} onchange="E().grp=+this.value;save()"> (tối đa 100). Thư chung không cá nhân hóa {{ten}} (sẽ hiện chữ "bạn").</div>` : ""}
+    <input style="width:100%" placeholder="CC cố định, nhiều email cách nhau bằng dấu phẩy (tùy chọn)" value="${esc(ed.cc)}" oninput="E().cc=this.value;save()">
+    <input style="width:100%" placeholder="BCC cố định, nhiều email cách nhau bằng dấu phẩy (tùy chọn)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()">
+    ${thm()}${TB}
+    <div class=dz onclick="$('#fp').click()">Kéo ảnh hoặc tệp từ máy tính thả vào đây, hoặc bấm để chọn<br><span class=m>Ảnh thành khối ảnh trong thư. Tệp khác (PDF, Word...) thành tệp đính kèm.</span></div>
+    <input type=file id=fp multiple hidden onchange="addFiles([...this.files]);this.value=''">${fl()}
+    ${blk()}<p><button class=g onclick="add('r')">+ Văn bản</button> <button class=g onclick="add('btn')">+ Nút bấm</button> <button class=g onclick="add('hr')">+ Đường kẻ</button> <button class=g onclick="$('#fp').click()">+ Ảnh</button></p>
+    <button onclick=test()>Gửi thử cho tôi</button></div>
+    <div><b>Xem trước</b> <span class=m>({{ten}} sẽ được thay bằng tên người nhận)</span><iframe id=pf></iframe></div></div></div>` : ""}`;
 }
 
 /* ---------- Gửi mail qua Gmail API ---------- */
 const u8 = s => { const a = new TextEncoder().encode(s); let b = ""; for (let i = 0; i < a.length; i++) b += String.fromCharCode(a[i]); return btoa(b); };
 const b64url = s => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const hdr = s => "=?UTF-8?B?" + u8(s) + "?=";
-function mime(to, name, subj, body) {
-  return b64url(u8([`From: ${hdr(U.name)} <${U.email}>`, `To: ${name ? hdr(name) + " " : ""}<${to}>`, `Subject: ${hdr(subj)}`, "MIME-Version: 1.0",
-    'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", u8(body).replace(/(.{76})/g, "$1\r\n")].join("\r\n")));
+const wrap = s => s.replace(/(.{76})/g, "$1\r\n");
+const b64blob = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(",")[1]); fr.readAsDataURL(b); });
+async function assets(c) {
+  const imgs = [], files = [];
+  for (const id of new Set(c.blocks.filter(b => b.t == "img" && b.v).map(b => b.v))) { const r = await fget(id); if (r) imgs.push({id, type: r.type, b64: wrap(await b64blob(r.blob))}); }
+  for (const f of c.files) { const r = await fget(f.id); if (r) files.push({name: f.name, type: f.type || "application/octet-stream", b64: wrap(await b64blob(r.blob))}); }
+  return {imgs, files};
+}
+function mime(to, subj, body, A, cc = [], bcc = []) {
+  const b1 = "r" + uid() + uid(), b2 = "m" + uid() + uid();
+  const H = [`From: ${hdr(U.name)} <${U.email}>`, `To: ${to}`, ...(cc.length ? [`Cc: ${cc.join(",\r\n ")}`] : []), ...(bcc.length ? [`Bcc: ${bcc.join(",\r\n ")}`] : []), `Subject: ${hdr(subj)}`, "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${b2}"`, "", `--${b2}`, `Content-Type: multipart/related; boundary="${b1}"`, "",
+    `--${b1}`, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", wrap(u8(body))];
+  for (const m of A.imgs) H.push(`--${b1}`, `Content-Type: ${m.type}; name="${m.id}"`, "Content-Transfer-Encoding: base64", `Content-ID: <${m.id}@csk>`, `Content-Disposition: inline; filename="${m.id}"`, "", m.b64);
+  H.push(`--${b1}--`);
+  for (const f of A.files) H.push(`--${b2}`, `Content-Type: ${f.type}; name="${hdr(f.name)}"`, "Content-Transfer-Encoding: base64", `Content-Disposition: attachment; filename="${hdr(f.name)}"`, "", f.b64);
+  H.push(`--${b2}--`, "");
+  return H.join("\r\n");
 }
 async function gsend(raw) {
-  const t = await getTok(), r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-    {method: "POST", headers: {Authorization: "Bearer " + t, "Content-Type": "application/json"}, body: JSON.stringify({raw})});
+  const t = await getTok(); let r;
+  try { r = await fetch("https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media", {method: "POST", headers: {Authorization: "Bearer " + t, "Content-Type": "message/rfc822"}, body: raw}); }
+  catch (e) { r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {method: "POST", headers: {Authorization: "Bearer " + t, "Content-Type": "application/json"}, body: JSON.stringify({raw: b64url(u8(raw))})}); }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || "HTTP " + r.status);
 }
 function personal(c, x, tok) {
-  const nm = esc(x.name) || "bạn";
-  let h = html(c.blocks).replace(/{{ten}}/g, nm);
-  if (D.track) { const b = D.track.replace(/\/$/, ""); h = h.replace(/href="(https?:[^"]+)"/g, (m, u) => `href="${b}/c?t=${tok}&u=${encodeURIComponent(u)}"`) + `<img src="${b}/o?t=${tok}" width="1" height="1" alt="">`; }
+  let h = html(c, "mail").replace(/{{ten}}/g, esc(x.name) || "bạn");
+  if (D.track) { const b = D.track.replace(/\/$/, ""); h = h.replace(/href="(https?:[^"]+)"/g, (m, u) => `href="${b}/c?t=${tok}&u=${encodeURIComponent(u.replace(/&amp;/g, "&"))}"`) + `<img src="${b}/o?t=${tok}" width="1" height="1" alt="">`; }
   return [(c.subject || "(Không tiêu đề)").replace(/{{ten}}/g, x.name || "bạn"), h];
 }
 async function test() {
   const c = E(); if (!c.subject) return alert("Nhập tiêu đề trước.");
-  try { const [s, h] = personal(c, {name: "Thử nghiệm"}, "test"); await gsend(mime(U.email, "", s, h)); alert("Đã gửi thử vào hộp thư của bạn."); }
+  try { const [s, h] = personal(c, {name: "Thử nghiệm"}, "test"); await gsend(mime(`<${U.email}>`, s, h, await assets(c))); alert("Đã gửi thử vào hộp thư của bạn."); }
   catch (e) { alert("Lỗi: " + e.message); }
 }
+const isMail = x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x);
+const tokens = s => String(s || "").split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+const mails = s => [...new Set(tokens(s).filter(isMail))];
 const today = () => new Date().toLocaleDateString("sv");
 const usedToday = () => D.sent.filter(s => s.ok && s.at.startsWith(today())).length;
 let LOG = [];
@@ -185,7 +323,9 @@ const say = t => { LOG.push(new Date().toLocaleTimeString("vi") + "  " + t); con
 async function run(id) {
   if (RUN) return alert("Đang có chiến dịch chạy.");
   const c = D.camps.find(x => x.id == id); if (!c.subject) return alert("Chiến dịch chưa có tiêu đề.");
+  const badCc = [...tokens(c.cc), ...tokens(c.bcc)].filter(x => !isMail(x)); if (badCc.length) return alert("Email CC/BCC không hợp lệ: " + badCc.join(", "));
   if (!confirm("Bắt đầu gửi chiến dịch \"" + c.name + "\"?")) return;
+  const ccL = mails(c.cc), bccL = mails(c.bcc);
   RUN = 1; STOP = 0; LOG = [];
   const done = new Set(D.sent.filter(s => s.cid == id && s.ok).map(s => s.email)), seen = new Map();
   D.contacts.filter(x => !x.unsub && (!c.list || x.list == c.list) && !done.has(x.email)).forEach(x => seen.has(x.email) || seen.set(x.email, x));
@@ -193,12 +333,22 @@ async function run(id) {
   say(`Còn ${seen.size} người chưa gửi. Hôm nay còn được gửi ${room} mail.`);
   let fails = 0;
   try {
+    const A = await assets(c);
     for (let i = 0; i < todo.length && !STOP && fails < 5; i += size) {
-      for (const x of todo.slice(i, i + size)) {
+      const part = todo.slice(i, i + size), one = c.mode == "one", G = one ? 1 : Math.min(100, Math.max(1, +c.grp || 50)), units = [];
+      for (let k = 0; k < part.length; k += G) units.push(part.slice(k, k + G));
+      for (const u of units) {
         if (STOP) break;
-        const tok = uid() + uid(), [s, h] = personal(c, x, tok), rec = {cid: id, email: x.email, name: x.name, tok, at: new Date().toLocaleString("sv"), batch: i / size + 1};
-        try { await gsend(mime(x.email, x.name, s, h)); rec.ok = 1; fails = 0; } catch (e) { rec.ok = 0; rec.err = e.message; say(`Lỗi ${x.email}: ${e.message}`); if (++fails >= 5) { say("Lỗi liên tiếp 5 lần, dừng lại."); break; } }
-        D.sent.push(rec); save(); await sleep(1000);
+        const tok = uid() + uid(), [s, h] = personal(c, one ? u[0] : {name: ""}, tok), em = u.map(x => x.email);
+        const to = one ? `${u[0].name ? hdr(u[0].name) + " " : ""}<${u[0].email}>` : `<${U.email}>`;
+        const cc = [...new Set([...(c.mode == "cc" ? em : []), ...ccL])], bcc = [...new Set([...(c.mode == "bcc" ? em : []), ...bccL])];
+        let ok = 1, err = "";
+        try { await gsend(mime(to, s, h, A, cc, bcc)); fails = 0; } catch (e) { ok = 0; err = e.message; say(`Lỗi ${one ? em[0] : em.length + " người nhận"}: ${err}`); fails++; }
+        const at = new Date().toLocaleString("sv");
+        u.forEach(x => D.sent.push({cid: id, email: x.email, name: x.name, tok, at, batch: i / size + 1, ok, ...(ok ? {} : {err})}));
+        save();
+        if (fails >= 5) { say("Lỗi liên tiếp 5 lần, dừng lại."); break; }
+        await sleep(1000);
       }
       say(`Xong lô ${i / size + 1}.`);
       if (i + size < todo.length && !STOP && fails < 5) { say(`Nghỉ ${D.set.delay} phút...`); for (let k = 0; k < D.set.delay * 60 && !STOP; k++) await sleep(1000); }
