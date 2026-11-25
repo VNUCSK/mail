@@ -27,7 +27,7 @@ pre{background:#241c15;color:#9fe;padding:10px;border-radius:6px;max-height:200p
 <div id="app"></div>
 <script>
 // Nếu muốn, dán sẵn OAuth Client ID vào đây. Để trống thì trang sẽ hỏi lần đầu.
-const CID_DEFAULT = "";
+const CID_DEFAULT = "484812261158-a37b9kuotiv8ctj2b3fb8n0mfc9fjdg3.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -47,7 +47,7 @@ function loginView() {
     <button onclick=login() style="display:inline-flex;align-items:center;gap:10px;padding:10px 20px;background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:24px;font-weight:500">
     <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.2 5.5-4.7 7.2l7.6 5.9c4.4-4.1 6.9-10.1 6.9-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.100 15.9-5.800l-7.6-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>
     Đăng nhập bằng Google</button>
-    <p class=m><a href="#" onclick="delete localStorage.csk_cid;boot();return false">Đổi Client ID</a></p></div></div>`;
+    </div></div>`;
 }
 function getTok(prompt = "") {
   return new Promise((res, rej) => {
