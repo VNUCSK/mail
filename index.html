@@ -34,6 +34,19 @@ details{border:1px solid #e6e6e2;border-radius:8px;margin:8px 0;background:#fcfc
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}.stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px #0001;color:#777}.stat b{display:block;font-size:28px;color:#241c15}
 .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;background:#e4e4e0}.tag.ok{background:#d9f2dd;color:#176b2b}.prev{position:sticky;top:12px;align-self:start}ol{padding-left:20px}
 @media(max-width:700px){aside{width:100%;padding:8px}main{padding:14px}}
+/* Thanh định dạng chữ nằm ở cột trái */
+aside{width:250px;position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-start}
+aside .me{margin-top:auto}
+#tbx{display:none;margin:14px 0 8px;padding:12px 10px;border-top:1px solid #ffffff22}
+#tbx .tb{position:static;background:none;border:0;padding:0;display:block;margin:0}
+#tbx .tbt{font-weight:700;color:#ffe01b;font-size:15px}
+#tbx .tbh{color:#bdb5ac;font-size:12px;margin:2px 0 10px;line-height:1.4}
+#tbx .tg{margin-bottom:9px}#tbx .tl{display:block;font-size:11px;color:#9a9288;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px}
+#tbx .tg>div{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+#tbx button{padding:4px 9px;min-width:34px;background:#f0efeb;color:#241c15}#tbx button:hover{background:#ffe01b}
+#tbx select{padding:4px;margin:0;flex:1;min-width:0}
+#tbx .cl{display:flex;align-items:center;gap:6px;color:#e6e1da;font-size:13px;background:#ffffff12;border-radius:4px;padding:3px 8px}
+@media(max-width:700px){aside{position:static;height:auto;width:100%}#tbx{width:100%}}
 </style>
 </head>
 <body>
@@ -165,6 +178,7 @@ function boot() { $("#app").innerHTML = loginView(); }
 /* ---------- Khung chính ---------- */
 function shell() {
   $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>👥 Liên hệ</a><a data-t=camps>✏️ Soạn thư</a><a data-t=history>🕘 Lịch sử</a><a data-t=set>⚙️ Cài đặt</a>
+    <div id=tbx>${TB}</div>
     <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a> · <a href="#" onclick="lockNow();return false" style="padding:0;display:inline;color:#ffe01b">Khóa</a></div></aside><main id=v></main>`;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
   go("contacts");
@@ -173,6 +187,7 @@ function go(t) {
   tab = t || tab; RT = null;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.className = (a.dataset.t == tab || (tab == "edit" && a.dataset.t == "camps")) ? "on" : "");
   $("#v").innerHTML = {contacts: vContacts, camps: vCamps, edit: vEdit, history: vHist, set: vSet}[tab]();
+  $("#tbx").style.display = (tab == "edit" && cur.edit) ? "block" : "none";
   if (cur.edit && tab == "edit") upd(true);
 }
 
@@ -237,16 +252,18 @@ function html(c, mode) {
   return `<div style="background:${T.outer};padding:16px 8px"><div style="max-width:${T.w}px;margin:auto;background:${T.bg};font-family:${T.font};color:${T.color}">${body}</div></div>`;
 }
 /* Thanh công cụ định dạng giống Gmail */
-const tbtn = (c, l, v) => `<button class=g title="${c}" onmousedown="event.preventDefault()" onclick="fc('${c}'${v ? `,'${v}'` : ""})">${l}</button>`;
-const TB = `<div class=tb>${tbtn("undo", "↶")}${tbtn("redo", "↷")}
-  <select onchange="fc('fontName',this.value);this.selectedIndex=0"><option value="">Phông</option>${["Arial", "Tahoma", "Verdana", "Georgia", "Times New Roman", "Courier New"].map(f => `<option>${f}</option>`).join("")}</select>
-  <select onchange="fc('size',this.value);this.selectedIndex=0"><option value="">Cỡ</option>${[12, 14, 16, 18, 20, 24, 28, 32, 40].map(s => `<option>${s}</option>`).join("")}</select>
-  ${tbtn("bold", "<b>B</b>")}${tbtn("italic", "<i>I</i>")}${tbtn("underline", "<u>U</u>")}${tbtn("strikeThrough", "<s>S</s>")}
-  <span title="Màu chữ">A <input type=color value="#d90000" onchange="fc('foreColor',this.value)"></span>
-  <span title="Màu nền chữ">▮ <input type=color value="#ffff00" onchange="fc('hiliteColor',this.value)"></span>
-  ${tbtn("justifyLeft", "⬅")}${tbtn("justifyCenter", "↔")}${tbtn("justifyRight", "➡")}${tbtn("justifyFull", "☰")}
-  ${tbtn("insertUnorderedList", "• Dấu đầu dòng")}${tbtn("insertOrderedList", "1. Số")}${tbtn("outdent", "⇤")}${tbtn("indent", "⇥")}
-  <button class=g title="Gắn link vào chữ (Ctrl+K)" onmousedown="event.preventDefault()" onclick="lk()">🔗 Gắn link</button>${tbtn("unlink", "Bỏ link")}${tbtn("removeFormat", "Xóa định dạng")}</div>`;
+const tbtn = (c, l, t, v) => `<button class=g title="${t}" onmousedown="event.preventDefault()" onclick="fc('${c}'${v ? `,'${v}'` : ""})">${l}</button>`;
+const tg_ = (l, h) => `<div class=tg><span class=tl>${l}</span><div>${h}</div></div>`;
+const TB = `<div class=tb><div class=tbt>✏️ Định dạng chữ</div><div class=tbh>Bấm vào đoạn văn bản, bôi đen chữ cần sửa rồi chọn kiểu bên dưới.</div>
+  ${tg_("Hoàn tác", tbtn("undo", "↶", "Quay lại bước trước") + tbtn("redo", "↷", "Làm lại bước vừa hoàn tác"))}
+  ${tg_("Phông chữ &amp; cỡ chữ", `<select title="Chọn phông chữ" onchange="fc('fontName',this.value);this.selectedIndex=0"><option value="">Phông</option>${["Arial", "Tahoma", "Verdana", "Georgia", "Times New Roman", "Courier New"].map(f => `<option>${f}</option>`).join("")}</select>
+  <select title="Chọn cỡ chữ" onchange="fc('size',this.value);this.selectedIndex=0"><option value="">Cỡ</option>${[12, 14, 16, 18, 20, 24, 28, 32, 40].map(s => `<option>${s}</option>`).join("")}</select>`)}
+  ${tg_("Kiểu chữ", tbtn("bold", "<b>B</b>", "In đậm") + tbtn("italic", "<i>I</i>", "In nghiêng") + tbtn("underline", "<u>U</u>", "Gạch chân") + tbtn("strikeThrough", "<s>S</s>", "Gạch ngang"))}
+  ${tg_("Màu sắc", `<label class=cl title="Màu chữ">A Màu chữ <input type=color value="#d90000" onchange="fc('foreColor',this.value)"></label><label class=cl title="Màu nền sau chữ (tô nổi bật)">▮ Màu nền <input type=color value="#ffff00" onchange="fc('hiliteColor',this.value)"></label>`)}
+  ${tg_("Căn lề", tbtn("justifyLeft", "⬅", "Căn trái") + tbtn("justifyCenter", "↔", "Căn giữa") + tbtn("justifyRight", "➡", "Căn phải") + tbtn("justifyFull", "☰", "Căn đều hai bên"))}
+  ${tg_("Danh sách", tbtn("insertUnorderedList", "• Dấu đầu dòng", "Danh sách có dấu chấm") + tbtn("insertOrderedList", "1. Số", "Danh sách đánh số") + tbtn("outdent", "⇤", "Thụt lề ra") + tbtn("indent", "⇥", "Thụt lề vào"))}
+  ${tg_("Đường link", `<button class=g title="Gắn link vào chữ đang bôi đen (Ctrl+K)" onmousedown="event.preventDefault()" onclick="lk()">🔗 Gắn link</button>` + tbtn("unlink", "Bỏ link", "Gỡ link khỏi chữ đang chọn"))}
+  ${tg_("Xóa định dạng", tbtn("removeFormat", "Xóa định dạng", "Đưa chữ về kiểu mặc định"))}</div>`;
 document.addEventListener("selectionchange", () => {
   const s = getSelection(); if (!s.rangeCount) return;
   const n = s.anchorNode?.nodeType == 3 ? s.anchorNode.parentElement : s.anchorNode, rt = n?.closest?.(".rt");
@@ -277,15 +294,9 @@ const rd = s => `<b><span style="color:#e02020">${s}</span></b>`;
 const ak = (u, t = "Tại đây") => `<a href="${u}" style="color:#1a0dab;text-decoration:underline">${t}</a>`;
 const J = v => ({t: "r", pad: 8, v: `<div style="text-align:justify">${v}</div>`});
 const TPL = [
-  {n: "Xác nhận tham gia (banner + nền xám)", th: {outer: "#ffffff", bg: "#ececec", w: 640, size: 14, color: "#222222"}, b: [
+  {n: "Xác nhận tham gia (banner + nền xám)", s: "[ĐHQGHN] Xác nhận tham gia Khóa đào tạo AI chuyên sâu cho MARKETING", th: {outer: "#ffffff", bg: "#ececec", w: 640, size: 14, color: "#222222"}, b: [
     {t: "img", v: "tpl_vnu", u: ""},
-    {t: "r", pad: 18, v: '<div style="text-align:center"><b><span style="color:#2b6cb0">THƯ XÁC NHẬN THAM GIA KHÓA ĐÀO TẠO</span></b></div><div><br></div><div style="text-align:center">' + rd("GIẢI PHÁP AI THỰC CHIẾN CHUYÊN SÂU CHO MARKETING") + '</div><div><br></div><div style="text-align:center"><b>Kính gửi: Quý Anh/Chị</b></div>'},
-    J('Trung tâm Chuyển giao Tri thức và Hỗ trợ Khởi nghiệp – Đại học Quốc gia Hà Nội (VNU-CSK) trân trọng cảm ơn Quý Anh/Chị đã quan tâm và đăng ký tham gia khóa đào tạo "Giải pháp AI thực chiến chuyên sâu cho Marketing".<br><br>Để hoàn thiện Giấy chứng nhận tham gia khóa học và chuẩn bị công tác hậu cần, kính đề nghị Quý Anh/Chị ' + rd("xác nhận lại việc tham gia khóa học trước 12h ngày 28/07/2026") + ' bằng cách xác nhận lại theo thông tin dưới đây.<br><br>Do số lượng đăng ký tham gia khóa đào tạo vượt ngoài dự kiến, nhằm đảm bảo điều kiện tổ chức, Ban Tổ chức xin trân trọng thông báo ' + rd("thay đổi hội trường khóa học") + '.<br><br>Kính đề nghị Quý Anh/Chị lưu ý thông tin địa điểm mới dưới đây và sắp xếp thời gian tham dự đúng giờ.'),
-    J('<b>Link xác nhận tham gia:</b> ' + ak("https://forms.gle/JCVCEv8cNqMqsbxj8") + '<br><br><b>- Thời gian:</b> 8h, ngày 30/7/2026 (Thứ 5).<br><br><b>- Địa điểm mới:</b> Giảng đường 3, nhà G3, ĐHQGHN, 144 Xuân Thủy, Cầu Giấy, Hà Nội.<br><br><b>- Học phí:</b> Được ' + rd("hỗ trợ 100%") + ' học phí từ nguồn ngân sách nhà nước. Doanh nghiệp tham gia không cần đóng kinh phí.<br><br><i>Doanh nghiệp gửi phiếu đăng ký bản mềm qua email: ' + ak("mailto:khoinghiep@vnu.edu.vn", "khoinghiep@vnu.edu.vn") + ' (Khi đi học mang theo Phiếu đăng ký bản cứng gửi Ban Tổ chức).</i><br><br><b>Link tải phiếu đăng ký:</b> ' + ak("https://drive.google.com/drive/folders/1I9PcCCm0jCPKLereIVgX3v0Luc2CgU8h") + '<br><br><b>Link Zalo lớp học:</b> ' + ak("https://zalo.me/g/i4ctmvvpsjvbrwojumup")),
-    ln(),
-    J('<b>Thông tin liên hệ:</b><br><br>Bà Đinh Khánh Linh<br>Trung tâm Chuyển giao Tri thức và Hỗ trợ Khởi nghiệp, Đại học Quốc gia Hà Nội<br><b>Điện thoại:</b> 0968.968.849<br><b>Email:</b> ' + ak("mailto:khoinghiep@vnu.edu.vn", "khoinghiep@vnu.edu.vn")),
-    ln(),
-    J('<b>TRUNG TÂM CHUYỂN GIAO TRI THỨC VÀ HỖ TRỢ KHỞI NGHIỆP, ĐHQGHN (VNU - CSK)</b><br><br>📍 Địa chỉ: Tòa HT1, KĐT ĐHQGHN, Hòa Lạc, Hà Nội<br>🌎 Website: ' + ak("http://csk.vnu.edu.vn", "csk.vnu.edu.vn") + '<br>🔗 LinkedIn: ' + ak("https://www.linkedin.com/company/vnu-csk/", "https://www.linkedin.com/company/vnu-csk/") + '<br>🔗 Youtube: ' + ak("https://www.youtube.com/@vnu_csk", "https://www.youtube.com/@vnu_csk"))]},
+    {t: "r", pad: 18, v: '<div style="text-align:center"><b><span style="color:#2b6cb0">THƯ XÁC NHẬN THAM GIA KHÓA ĐÀO TẠO</span></b></div><div><br></div><div style="text-align:center">' + rd("GIẢI PHÁP AI THỰC CHIẾN CHUYÊN SÂU CHO MARKETING") + '</div><div><br></div><div style="text-align:center"><b>Kính gửi: Quý Anh/Chị</b></div><div><br></div><div style="text-align:justify">Trung tâm Chuyển giao Tri thức và Hỗ trợ Khởi nghiệp – Đại học Quốc gia Hà Nội (VNU-CSK) trân trọng cảm ơn Quý Anh/Chị đã quan tâm và đăng ký tham gia khóa đào tạo "Giải pháp AI thực chiến chuyên sâu cho Marketing".<br><br>Để hoàn thiện Giấy chứng nhận tham gia khóa học và chuẩn bị công tác hậu cần, kính đề nghị Quý Anh/Chị ' + rd("xác nhận lại việc tham gia khóa học trước 12h ngày 28/07/2026") + ' bằng cách xác nhận lại theo thông tin dưới đây.<br><br>Do số lượng đăng ký tham gia khóa đào tạo vượt ngoài dự kiến, nhằm đảm bảo điều kiện tổ chức, Ban Tổ chức xin trân trọng thông báo ' + rd("thay đổi hội trường khóa học") + '.<br><br>Kính đề nghị Quý Anh/Chị lưu ý thông tin địa điểm mới dưới đây và sắp xếp thời gian tham dự đúng giờ.<br><br><b>Link xác nhận tham gia:</b> ' + ak("https://forms.gle/JCVCEv8cNqMqsbxj8") + '<br><br><b>- Thời gian:</b> 8h, ngày 30/7/2026 (Thứ 5).<br><br><b>- Địa điểm mới:</b> Giảng đường 3, nhà G3, ĐHQGHN, 144 Xuân Thủy, Cầu Giấy, Hà Nội.<br><br><b>- Học phí:</b> Được ' + rd("hỗ trợ 100%") + ' học phí từ nguồn ngân sách nhà nước. Doanh nghiệp tham gia không cần đóng kinh phí.<br><br><i>Doanh nghiệp gửi phiếu đăng ký bản mềm qua email: ' + ak("mailto:khoinghiep@vnu.edu.vn", "khoinghiep@vnu.edu.vn") + ' (Khi đi học mang theo Phiếu đăng ký bản cứng gửi Ban Tổ chức).</i><br><br><b>Link tải phiếu đăng ký:</b> ' + ak("https://drive.google.com/drive/folders/1I9PcCCm0jCPKLereIVgX3v0Luc2CgU8h") + '<br><br><b>Link Zalo lớp học:</b> ' + ak("https://zalo.me/g/i4ctmvvpsjvbrwojumup") + '</div><div><hr style="border:0;border-top:1px solid #999;margin:10px 0"></div><div style="text-align:justify"><b>Thông tin liên hệ:</b><br><br>Bà Đinh Khánh Linh<br>Trung tâm Chuyển giao Tri thức và Hỗ trợ Khởi nghiệp, Đại học Quốc gia Hà Nội<br><b>Điện thoại:</b> 0968.968.849<br><b>Email:</b> ' + ak("mailto:khoinghiep@vnu.edu.vn", "khoinghiep@vnu.edu.vn") + '</div><div><hr style="border:0;border-top:1px solid #999;margin:10px 0"></div><div style="text-align:justify"><b>TRUNG TÂM CHUYỂN GIAO TRI THỨC VÀ HỖ TRỢ KHỞI NGHIỆP, ĐHQGHN (VNU - CSK)</b><br><br>📍 Địa chỉ: Tòa HT1, KĐT ĐHQGHN, Hòa Lạc, Hà Nội<br>🌎 Website: ' + ak("http://csk.vnu.edu.vn", "csk.vnu.edu.vn") + '<br>🔗 LinkedIn: ' + ak("https://www.linkedin.com/company/vnu-csk/", "https://www.linkedin.com/company/vnu-csk/") + '<br>🔗 Youtube: ' + ak("https://www.youtube.com/@vnu_csk", "https://www.youtube.com/@vnu_csk") + '</div>'}]},
   {n: "Chào mừng thành viên mới", th: {outer: "#eef2f7", w: 600}, b: [hd("Chào mừng bạn!", "Rất vui được đồng hành cùng bạn", "#1f4fbf"),
     tx("Xin chào <b>{{ten}}</b>,<br><br>Cảm ơn bạn đã đăng ký. Bạn có thể bắt đầu ngay hôm nay:<br><br>✔ Khám phá sản phẩm và dịch vụ<br>✔ Nhận ưu đãi dành riêng cho thành viên<br>✔ Liên hệ hỗ trợ bất cứ lúc nào"), bt("Bắt đầu ngay", "#1f4fbf"), ln(), ft()]},
   {n: "Bản tin (Newsletter)", th: {outer: "#f4f4f2", font: "Georgia, serif"}, b: [
@@ -330,7 +341,7 @@ function tpl() {
 async function useTpl(i) {
   const t = TPL[i], c = E(); if (!confirm("Áp dụng mẫu \"" + t.n + "\" sẽ thay nội dung và màu sắc hiện tại. Tiếp tục?")) return;
   if (t.b.some(b => b.t == "img" && b.v == "tpl_vnu")) { const a = atob(TPLIMG.split(",")[1]), u = new Uint8Array(a.length); for (let k = 0; k < a.length; k++) u[k] = a.charCodeAt(k); await fput("tpl_vnu", {blob: new Blob([u], {type: "image/jpeg"}), type: "image/jpeg", name: "banner-vnu-csk.jpg"}); }
-  c.theme = Object.assign({}, THEME, t.th); c.blocks = JSON.parse(JSON.stringify(t.b)); $("#tpm")?.remove(); save(); go();
+  c.theme = Object.assign({}, THEME, t.th); c.blocks = JSON.parse(JSON.stringify(t.b)); if (t.s) c.subject = t.s; $("#tpm")?.remove(); save(); go();
 }
 /* Gắn link vào chữ (ví dụ "tại đây") */
 let LK = null;
@@ -437,7 +448,7 @@ function vEdit() {
   const op = k => (cur.op?.[k] ?? k == "s") ? "open" : "";
   return `<h2>Soạn thư</h2><div class=row><div ondragover="event.preventDefault()" ondrop="drop(event)">
     <div class=card><input style="width:100%" placeholder="Tên thư (chỉ để bạn dễ nhớ)" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
-    <input style="width:100%" placeholder="Tiêu đề thư" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
+    <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
     <details ${op("s")} ontoggle="(cur.op ??= {}).s = this.open"><summary>Người nhận &amp; kiểu gửi (CC, BCC)</summary><div>
     <div class=m><b>Tải thẳng file Excel/CSV người nhận</b> (cột email, tên nếu có):</div><input type=file id=qf accept=".xlsx,.xls,.csv"> <button class=g onclick=impQuick()>Nhập &amp; chọn làm người nhận</button>
     <select style="width:100%" onchange="E().list=this.value;save();go()"><option value="">Gửi tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
@@ -447,7 +458,7 @@ function vEdit() {
     <input style="width:100%" placeholder="BCC cố định, nhiều email cách nhau bằng dấu phẩy (tùy chọn)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()"></div></details>${plan(ed)}
     <details ${op("t")} ontoggle="(cur.op ??= {}).t = this.open"><summary>Giao diện thư (màu, phông, cỡ chữ)</summary><div>${thm()}</div></details>
     <button class=g onclick=tpl()>🎨 Mẫu thiết kế</button> <button class=g onclick=test()>Gửi thử cho tôi</button></div>
-    <div class=card>${TB}
+    <div class=card>
     <div class=dz onclick="$('#fp').click()">Kéo ảnh hoặc tệp từ máy tính thả vào đây, hoặc bấm để chọn<br><span class=m>Ảnh thành khối ảnh trong thư. Tệp khác (PDF, Word...) thành tệp đính kèm.</span></div>
     <input type=file id=fp multiple hidden onchange="addFiles([...this.files]);this.value=''">${fl()}
     ${blk()}<p><button class=g onclick="add('r')">+ Văn bản</button> <button class=g onclick="add('btn')">+ Nút bấm</button> <button class=g onclick="add('hr')">+ Đường kẻ</button> <button class=g onclick="$('#fp').click()">+ Ảnh</button></p></div></div>
