@@ -174,7 +174,7 @@ async function login() {
     if (getCloud()) { try { ME = await api("GET", "/me"); } catch (e) { ME = null; } }
     if (ME && ME.status && ME.status != "active") {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
-      LOGINERR = ME.status == "pending" ? `Yêu cầu truy cập của ${p.email} đã được gửi tới quản trị viên. Bạn sẽ đăng nhập được sau khi được duyệt.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên.`;
+      LOGINERR = ME.status == "pending" ? `Tài khoản ${p.email} chưa được duyệt. Yêu cầu đã gửi tới quản trị viên, bạn sẽ đăng nhập được sau khi được duyệt. Nếu bạn là quản trị viên: hãy kiểm tra biến ADMIN_EMAILS của Worker có đúng email ${p.email} không.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên.`;
       ME = null; return boot();
     }
     try { await cfetch("GET"); }
@@ -197,7 +197,7 @@ async function wipeAll() {
   if (await askText("Xóa liên hệ, thư, lịch sử và tệp lưu trên máy này (danh sách trên Kho chung không bị xóa). Gõ XOA để xác nhận:", "Gõ XOA") !== "XOA") return;
   clearTimeout(ST); delete localStorage[dkey()]; delete localStorage["csk2:" + U.email]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; FK = null; TOK = null; EXP = 0; U = null; boot();
 }
-function boot() { $("#app").innerHTML = loginView(); }
+function boot() { $("#app").innerHTML = loginView(); if (LOGINERR) toast(LOGINERR, "err"); }
 
 /* ---------- Khung chính ---------- */
 function shell() {
@@ -861,6 +861,9 @@ async function delShared(id) {
   try { await api("DELETE", "/templates/" + encodeURIComponent(id)); SHCACHE = {}; alert("Đã xóa mẫu \"" + s.n + "\"."); loadShared(); }
   catch (e) { toast("Lỗi: " + e.message, "err"); }
 }
+/* Báo lỗi chạy ngầm bằng thông báo nổi để không bị im lặng */
+addEventListener("error", e => { if (e.message && !/ResizeObserver/.test(e.message)) toast("Lỗi: " + e.message, "err"); });
+addEventListener("unhandledrejection", e => toast("Lỗi: " + (e.reason?.message || e.reason || "không rõ"), "err"));
 /* Tự đồng bộ Kho chung, lưu khi rời trang, cảnh báo khi đang gửi */
 const canAuto = () => D && !RUN && !document.hidden && getCloud() && TOK && Date.now() < EXP - 60000;
 setInterval(() => { if (canAuto()) cloudSync(); }, 120000);
