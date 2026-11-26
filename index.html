@@ -63,13 +63,14 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const getCid = () => CID_DEFAULT || localStorage.csk_cid || "";
-const CLOUD_DEFAULT = "";
+const CLOUD_DEFAULT = "https://csk-mail.vnucsk.workers.dev";
 const getCloud = () => (CLOUD_DEFAULT || localStorage.csk_cloud || "").replace(/\/+$/, "");
 let U, D, TOK, EXP = 0, client, tab = "contacts", RUN = 0, STOP = 0, cur = {list: "", cid: "", edit: null}, IMG = {}, RT = null, RG = null;
-/* ---------- Mã hóa dữ liệu (AES-256-GCM, khóa sinh từ mật khẩu của bạn) ---------- */
+/* ---------- Lưu dữ liệu trong trình duyệt theo tài khoản Google ---------- */
 const DEF = () => ({contacts: [], camps: [], sent: [], set: {batch: 150, delay: 3, cap: 2000, gap: 5, mask: true, lock: 15}});
 let KEY, SALT, ST, FQ = Promise.resolve(), LASTACT = Date.now();
-const skey = () => "csk2:" + U.email;
+const skey = () => "csk2:" + U.email; // bản cũ có mật khẩu (chỉ dùng để chuyển đổi)
+const dkey = () => "csk3:" + U.email;
 const b2s = b => { let s = ""; const a = new Uint8Array(b); for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); };
 const s2b = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 async function derive(pw, salt) {
@@ -82,9 +83,8 @@ async function openBox(raw, pw) {
   SALT = salt; KEY = k; return JSON.parse(new TextDecoder().decode(pt));
 }
 const flush = () => FQ = FQ.then(async () => {
-  if (!KEY || !D || !U) return;
-  const iv = crypto.getRandomValues(new Uint8Array(12)), ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, KEY, new TextEncoder().encode(JSON.stringify(D)));
-  localStorage[skey()] = JSON.stringify({v: 2, s: b2s(SALT), i: b2s(iv), c: b2s(ct)});
+  if (!D || !U) return;
+  localStorage[dkey()] = JSON.stringify(D);
 }).catch(e => console.error(e));
 const save = () => { clearTimeout(ST); ST = setTimeout(flush, 250); };
 function setD(o) {
@@ -98,16 +98,9 @@ window.addEventListener("drop", e => e.preventDefault());
 
 /* ---------- Kho ảnh/tệp (IndexedDB) ---------- */
 const idb = new Promise(r => { const q = indexedDB.open("csk", 1); q.onupgradeneeded = () => q.result.createObjectStore("f"); q.onsuccess = () => r(q.result); });
-let FK = null;
-async function initFK() {
-  if (!D.fk) D.fk = b2s(crypto.getRandomValues(new Uint8Array(32)));
-  FK = await crypto.subtle.importKey("raw", s2b(D.fk), "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-const fput = async (k, v) => {
-  const d = await idb; let rec = v;
-  if (FK) { const iv = crypto.getRandomValues(new Uint8Array(12)); rec = {enc: 1, iv, ct: await crypto.subtle.encrypt({name: "AES-GCM", iv}, FK, await v.blob.arrayBuffer()), type: v.type, name: v.name}; }
-  return new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").put(rec, k); t.oncomplete = r; });
-};
+let FK = null; // chỉ để đọc các tệp cũ đã mã hóa
+async function initFK() { FK = D.fk ? await crypto.subtle.importKey("raw", s2b(D.fk), "AES-GCM", false, ["decrypt"]) : null; }
+const fput = async (k, v) => { const d = await idb; return new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").put(v, k); t.oncomplete = r; }); };
 const fget = async k => {
   const d = await idb, r = await new Promise(res => { const q = d.transaction("f").objectStore("f").get(k); q.onsuccess = () => res(q.result); });
   if (r && r.enc) { try { return {blob: new Blob([await crypto.subtle.decrypt({name: "AES-GCM", iv: r.iv}, FK, r.ct)], {type: r.type}), type: r.type, name: r.name}; } catch (e) { return undefined; } }
@@ -141,56 +134,27 @@ async function login() {
     await getTok("select_account");
     const p = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}})).json();
     U = {email: p.email, name: p.name || p.email};
-    if (!window.crypto?.subtle) return alert("Trình duyệt không hỗ trợ mã hóa (cần mở bằng https).");
-    pwView(localStorage[skey()] ? "unlock" : "new");
+    await loadLocal();
   } catch (e) { alert("Đăng nhập lỗi: " + e.message); }
 }
-async function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); clearTimeout(ST); await flush(); D = null; KEY = null; FK = null; TOK = null; U = null; boot(); }
-function pwView(mode) {
-  const nw = mode == "new", go_ = nw ? "pwNew()" : "pwUnlock()";
-  $("#app").innerHTML = `<div class=login><div class=card><h2>${nw ? "Đặt mật khẩu bảo vệ dữ liệu" : "Mở khóa dữ liệu"}</h2><p class=m>${esc(U.email)}</p>
-    ${nw ? `<p>Danh sách email của bạn sẽ được <b>mã hóa ngay trên máy này</b> bằng mật khẩu bên dưới (không phải mật khẩu Google). <b>Quên mật khẩu thì không khôi phục được dữ liệu.</b></p>` : ""}
-    <input id=pw1 type=password style="width:100%" placeholder="Mật khẩu${nw ? " (tối thiểu 8 ký tự)" : ""}" onkeydown="if(event.key=='Enter')${go_}">
-    ${nw ? `<input id=pw2 type=password style="width:100%" placeholder="Nhập lại mật khẩu" onkeydown="if(event.key=='Enter')pwNew()">` : ""}
-    <p><button onclick="${go_}">${nw ? "Tạo mật khẩu & vào" : "Mở khóa"}</button></p>
-    ${nw ? "" : `<p class=m><a href="#" onclick="pwForgot();return false">Quên mật khẩu? Xóa dữ liệu và bắt đầu lại</a> · <a href="#" onclick="logout();return false">Đăng xuất</a></p>`}</div></div>`;
-  $("#pw1").focus();
+async function loadLocal() {
+  let o = null; try { o = JSON.parse(localStorage[dkey()] || "null"); } catch (e) {}
+  if (!o && localStorage[skey()]) { // dữ liệu cũ đang có mật khẩu: chuyển đổi một lần
+    for (;;) {
+      const pw = prompt("Dữ liệu cũ trên máy này đang được bảo vệ bằng mật khẩu. Nhập mật khẩu cũ MỘT LẦN để chuyển sang chế độ chỉ cần đăng nhập Google (bấm Hủy để bắt đầu với dữ liệu trống):");
+      if (pw === null) break;
+      try { o = await openBox(localStorage[skey()], pw); delete localStorage[skey()]; break; } catch (e) { alert("Sai mật khẩu, thử lại."); }
+    }
+  }
+  if (!o) { try { o = JSON.parse(localStorage["csk:" + U.email] || "{}"); } catch (e) { o = {}; } }
+  setD(o); await initFK(); await flush(); cur.edit = null; shell();
 }
-async function pwNew() {
-  const a = $("#pw1").value, b = $("#pw2").value;
-  if (a.length < 8) return alert("Mật khẩu tối thiểu 8 ký tự.");
-  if (a != b) return alert("Hai mật khẩu không khớp.");
-  SALT = crypto.getRandomValues(new Uint8Array(16)); KEY = await derive(a, SALT);
-  let old = {}; try { old = JSON.parse(localStorage["csk:" + U.email] || "{}"); } catch (e) {}
-  setD(old); await initFK(); await flush(); delete localStorage["csk:" + U.email]; cur.edit = null; shell();
-}
-async function pwUnlock() {
-  try { setD(await openBox(localStorage[skey()], $("#pw1").value)); await initFK(); } catch (e) { return alert("Sai mật khẩu."); }
-  cur.edit = null; shell();
-}
-function pwForgot() {
-  if (prompt("Việc này XÓA toàn bộ liên hệ, thư và lịch sử đã lưu trên máy này. Gõ XOA để tiếp tục:") !== "XOA") return;
-  delete localStorage[skey()]; wipeFiles(); pwView("new");
-}
-async function lockNow() {
-  if (RUN || !D) return; clearTimeout(ST); await flush(); D = null; KEY = null; FK = null; TOK = null; EXP = 0; cur.edit = null;
-  document.querySelectorAll("#tpm,#lkm,#pwm").forEach(x => x.remove()); pwView("unlock");
-}
+async function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); clearTimeout(ST); await flush(); D = null; FK = null; TOK = null; EXP = 0; U = null; boot(); }
 async function wipeFiles() { const d = await idb; await new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").clear(); t.oncomplete = r; }); IMG = {}; }
 async function wipeAll() {
   if (RUN) return alert("Đang gửi, hãy dừng trước.");
-  if (prompt("Xóa toàn bộ liên hệ, thư, lịch sử và tệp trên máy này. Gõ XOA để xác nhận:") !== "XOA") return;
-  clearTimeout(ST); delete localStorage[skey()]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; KEY = null; FK = null; TOK = null; U = null; boot();
-}
-function chPw() {
-  $("#pwm")?.remove(); const d = document.createElement("div"); d.id = "pwm"; d.style.cssText = "position:fixed;inset:0;background:#0006;z-index:50;display:flex;align-items:center;justify-content:center";
-  d.innerHTML = `<div class=card style="width:min(380px,92vw);margin:0"><b>Đổi mật khẩu bảo vệ dữ liệu</b><br><input id=np1 type=password style="width:100%" placeholder="Mật khẩu mới (tối thiểu 8 ký tự)"><br><input id=np2 type=password style="width:100%" placeholder="Nhập lại"><p><button onclick=chPwOk()>Lưu</button> <button class=g onclick="$('#pwm').remove()">Hủy</button></p></div>`;
-  document.body.appendChild(d); $("#np1").focus();
-}
-async function chPwOk() {
-  const a = $("#np1").value, b = $("#np2").value;
-  if (a.length < 8) return alert("Mật khẩu tối thiểu 8 ký tự."); if (a != b) return alert("Hai mật khẩu không khớp.");
-  SALT = crypto.getRandomValues(new Uint8Array(16)); KEY = await derive(a, SALT); await flush(); $("#pwm").remove(); alert("Đã đổi mật khẩu.");
+  if (prompt("Xóa liên hệ, thư, lịch sử và tệp lưu trên máy này (danh sách trên Kho chung không bị xóa). Gõ XOA để xác nhận:") !== "XOA") return;
+  clearTimeout(ST); delete localStorage[dkey()]; delete localStorage[skey()]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; FK = null; TOK = null; EXP = 0; U = null; boot();
 }
 function boot() { $("#app").innerHTML = loginView(); }
 
@@ -198,7 +162,7 @@ function boot() { $("#app").innerHTML = loginView(); }
 function shell() {
   $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>👥 Liên hệ</a><a data-t=camps>✏️ Soạn thư</a><a data-t=history>🕘 Lịch sử</a><a data-t=set>⚙️ Cài đặt</a>
     <div id=tbx>${TB}</div>
-    <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a> · <a href="#" onclick="lockNow();return false" style="padding:0;display:inline;color:#ffe01b">Khóa</a></div></aside><main id=v></main>`;
+    <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a></div></aside><main id=v></main>`;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
   go("contacts"); cloudSync();
 }
@@ -217,8 +181,6 @@ function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
   return `<h2>Liên hệ</h2>${cloudBar()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
     <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
-    <div class=card><b>🔐 Chia sẻ danh sách với tài khoản khác</b> <span class=m>Xuất ra file mã hóa bằng mật khẩu chia sẻ, tài khoản kia bấm "Nhập file" và nhập đúng mật khẩu là có đủ danh sách. File này an toàn để gửi qua Zalo/email/Drive, người không có mật khẩu không đọc được.</span><br>
-    <button class=g onclick=shareExp()>⬆ Xuất file chia sẻ</button> <button class=g onclick="$('#sf').click()">⬇ Nhập file chia sẻ</button><input type=file id=sf accept=".csklist" hidden onchange="shareImp(this.files[0]);this.value=''"></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
     ${cur.list ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
     <p class=m>Hiển thị tối đa 300 dòng${D.set.mask === false ? "" : "; email được ẩn một phần (đổi trong Cài đặt)"}.</p><table><tr><th>Email<th>Tên<th>Danh sách<th>Trạng thái<th></tr>
@@ -230,11 +192,6 @@ let CSTAT = "", CBUSY = 0, CT;
 const CST = t => { CSTAT = t; const e = $("#cst"); if (e) e.textContent = t; };
 const cloudBar = () => getCloud() ? `<div class=card style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class=g onclick="cloudSync(1)">☁️ Đồng bộ ngay</button><span class=m id=cst>${esc(CSTAT)}</span></div>` : "";
 const csync = () => { if (!getCloud()) return; clearTimeout(CT); CT = setTimeout(() => cloudSync(), 1500); };
-function setCloud(v) {
-  v = v.trim().replace(/\/+$/, "");
-  if (v && !/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.workers\.dev$/i.test(v)) return alert("Địa chỉ phải có dạng https://ten.tai-khoan.workers.dev");
-  localStorage.csk_cloud = v; CST(""); go();
-}
 const slim = () => D.contacts.map(({email, name, list, unsub, u}) => ({email, name: name || "", list, ...(unsub ? {unsub: true} : {}), u: u || 0}));
 const norm = a => JSON.stringify((a || []).map(({email, name, list, unsub, u}) => [list, email, name || "", unsub ? 1 : 0, u || 0]).sort((x, y) => (x[0] + "|" + x[1]).localeCompare(y[0] + "|" + y[1])));
 function mergeIn(R) {
@@ -269,34 +226,6 @@ async function cloudSync(manual) {
     if (tab == "contacts" && (manual || D.contacts.length != n0)) go();
   } catch (e) { CST("Chưa đồng bộ được: " + (e.message || e)); }
   CBUSY = 0;
-}
-async function shareExp() {
-  if (!D.contacts.length) return alert("Chưa có liên hệ nào để xuất.");
-  const pw = prompt("Đặt mật khẩu chia sẻ (tối thiểu 8 ký tự).\nHãy gửi mật khẩu này cho người nhận bằng kênh khác, không gửi cùng file:");
-  if (!pw) return; if (pw.length < 8) return alert("Mật khẩu tối thiểu 8 ký tự.");
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), k = await derive(pw, salt);
-  const data = {v: 1, contacts: D.contacts.map(({email, name, list, unsub}) => ({email, name, list, unsub}))};
-  const ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, k, new TextEncoder().encode(JSON.stringify(data)));
-  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({csk: 1, s: b2s(salt), i: b2s(iv), c: b2s(ct)})], {type: "application/octet-stream"}));
-  a.download = "danh-sach-email.csklist"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  alert(`Đã xuất ${data.contacts.length} liên hệ. Gửi file cho người nhận và báo mật khẩu qua kênh khác.`);
-}
-async function shareImp(f) {
-  if (!f) return;
-  let data;
-  try {
-    const o = JSON.parse(await f.text()); if (!o.csk) throw 0;
-    const pw = prompt("Nhập mật khẩu chia sẻ của file này:"); if (!pw) return;
-    data = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: s2b(o.i)}, await derive(pw, s2b(o.s)), s2b(o.c))));
-  } catch (e) { return alert("Không mở được file: sai mật khẩu hoặc file không đúng định dạng."); }
-  const have = new Set(D.contacts.map(c => c.list + "|" + c.email)); let add = 0, dup = 0;
-  for (const c of data.contacts || []) {
-    if (!isMail(String(c.email || ""))) continue;
-    const key = c.list + "|" + c.email;
-    if (have.has(key)) { dup++; continue; }
-    have.add(key); D.contacts.push({id: uid(), email: c.email, name: c.name || "", list: c.list || "Chung", u: Date.now(), ...(c.unsub ? {unsub: true} : {})}); add++;
-  }
-  save(); csync(); alert(`Đã thêm ${add} liên hệ, bỏ qua ${dup} liên hệ trùng.`); go();
 }
 function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; c.u = Date.now(); save(); csync(); go(); }
 function delList() {
@@ -564,20 +493,11 @@ function vSet() {
     Gửi riêng: mỗi lô <input type=number value=${s.batch} style="width:70px" onchange="D.set.batch=Math.max(1,+this.value||150);save()"> mail, nghỉ <input type=number value=${s.delay} style="width:55px" onchange="D.set.delay=+this.value;save()"> phút.<br>
     Tối đa mỗi ngày <input type=number value=${s.cap} style="width:75px" onchange="D.set.cap=+this.value;save()"> người nhận.
     <div class=m>Hôm nay đã gửi: <b>${usedToday()}</b> người. Gmail giới hạn số người nhận mỗi thư và mỗi ngày tùy loại tài khoản, hãy đặt mức phù hợp với tài khoản của bạn.</div></div>
-    <div class=card><b>☁️ Kho chung (Cloudflare)</b>
-    <div class=m>Danh sách liên hệ được lưu trên Cloudflare của bạn và dùng chung cho các tài khoản được cấp quyền, nên tài khoản nào đăng nhập cũng thấy. Dữ liệu trên Cloudflare <b>không mã hóa</b>; chỉ tài khoản Google nằm trong danh sách cho phép (cài trong Worker) mới đọc/ghi được.</div>
-    <input style="width:100%" placeholder="Địa chỉ Worker, ví dụ https://csk-mail.ten-ban.workers.dev" value="${esc(getCloud())}" ${CLOUD_DEFAULT ? "disabled" : ""} onchange="setCloud(this.value)">
-    <button class=g onclick="cloudSync(1)">Kiểm tra &amp; đồng bộ</button> <span class=m id=cst>${esc(CSTAT)}</span></div>
-    <div class=card><b>🔒 Bảo mật dữ liệu</b>
-    <ul class=m><li>Liên hệ, thư và lịch sử được <b>mã hóa AES-256</b> bằng mật khẩu của bạn trước khi lưu trong trình duyệt. Nếu không bật Kho chung, không có máy chủ nào nhận dữ liệu của bạn.</li>
-    <li>Khi bật Kho chung, danh sách liên hệ (không phải thư, ảnh hay lịch sử) được lưu <b>không mã hóa</b> trong Cloudflare của bạn và chỉ các tài khoản trong danh sách cho phép mới đọc được.</li>
-    <li>Ứng dụng chỉ xin quyền <b>gửi thư</b> của Gmail, không đọc được hộp thư của bạn.</li>
-    <li>Ảnh và tệp đính kèm thêm từ nay cũng được mã hóa. Hãy xóa dữ liệu khi dùng máy chung.</li>
-    <li><b>Trang này chạy hoàn toàn trên trình duyệt</b>: danh sách email chỉ nằm trong máy của bạn, không bao giờ được đưa lên GitHub. Chỉ đưa file <code>index.html</code> lên GitHub, tuyệt đối <b>không</b> commit file Excel/CSV chứa email vào kho.</li>
-    <li>Quên mật khẩu thì không khôi phục được dữ liệu (chỉ xóa để bắt đầu lại).</li></ul>
-    <label><input type=checkbox ${s.mask !== false ? "checked" : ""} onchange="D.set.mask=this.checked;save()"> Ẩn một phần email khi hiển thị trên màn hình (ab•••@gmail.com)</label><br>
-    Tự khóa sau <input type=number min=0 value=${s.lock} style="width:60px" onchange="D.set.lock=Math.max(0,+this.value||0);save()"> phút không thao tác (0 = tắt; không khóa khi đang gửi).<br><br>
-    <button class=g onclick=lockNow()>Khóa ngay</button> <button class=g onclick=chPw()>Đổi mật khẩu</button> <button class=g onclick=wipeAll()>Xóa toàn bộ dữ liệu trên máy này</button></div>`;
+    <div class=card><b>☁️ Kho chung</b>
+    <div class=m>Danh sách liên hệ tự động đồng bộ với Cloudflare khi đăng nhập, khi có thay đổi và mỗi 2 phút. Các tài khoản Google được cấp quyền đều thấy cùng một danh sách.</div>
+    <button class=g onclick="cloudSync(1)">☁️ Đồng bộ ngay</button> <span class=m id=cst>${esc(CSTAT)}</span></div>
+    <div class=card><label><input type=checkbox ${s.mask !== false ? "checked" : ""} onchange="D.set.mask=this.checked;save()"> Ẩn một phần email khi hiển thị trên màn hình (ab•••@gmail.com)</label><br><br>
+    <button class=g onclick=wipeAll()>Xóa dữ liệu lưu trên máy này</button></div>`;
 }
 /* ---------- Gửi mail qua Gmail API ---------- */
 const u8 = s => { const a = new TextEncoder().encode(s); let b = ""; for (let i = 0; i < a.length; i++) b += String.fromCharCode(a[i]); return btoa(b); };
@@ -672,11 +592,11 @@ function exp() {
   const rows = D.sent.map(s => ({"Thư": nm(s.cid), Email: s.email, "Tên": s.name, "Trạng thái": s.ok ? "Đã gửi" : "Lỗi", "Lỗi": s.err || "", "Thời gian gửi": s.at, "Thư số": s.batch}));
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lịch sử"); XLSX.writeFile(wb, "lich_su_gui_mail.xlsx");
 }
-/* Tự khóa khi không thao tác, lưu khi rời trang, cảnh báo khi đang gửi */
-["click", "keydown", "mousemove", "touchstart"].forEach(e => addEventListener(e, () => LASTACT = Date.now(), {passive: true}));
-setInterval(() => { if (D && !RUN && D.set.lock > 0 && Date.now() - LASTACT > D.set.lock * 60000) lockNow(); }, 20000);
+/* Tự đồng bộ Kho chung, lưu khi rời trang, cảnh báo khi đang gửi */
+const canAuto = () => D && !RUN && !document.hidden && getCloud() && TOK && Date.now() < EXP - 60000;
+setInterval(() => { if (canAuto()) cloudSync(); }, 120000);
 addEventListener("pagehide", () => { clearTimeout(ST); flush(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(ST); flush(); } });
+document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(ST); flush(); } else if (canAuto()) cloudSync(); });
 addEventListener("beforeunload", e => { if (RUN) { e.preventDefault(); e.returnValue = ""; } });
 boot();
 </script>
