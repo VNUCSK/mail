@@ -106,11 +106,12 @@ async function loadImg(id) { const r = await fget(id); if (r) IMG[id] = {url: UR
 const preload = async c => { for (const b of c.blocks) if (b.t == "img" && b.v && !IMG[b.v]) await loadImg(b.v); };
 
 /* ---------- Đăng nhập Google ---------- */
+let LOGINERR = "";
 function loginView() {
   if (!getCid()) return `<div class=login><div class=card><h2>Thiết lập lần đầu</h2>
     <p>Dán <b>OAuth Client ID</b> của Google.</p>
     <input id=cid style="width:100%" placeholder="xxxx.apps.googleusercontent.com"><p><button onclick="localStorage.csk_cid=$('#cid').value.trim();boot()">Lưu</button></p></div></div>`;
-  return `<div class=login><div class=card><h2>Mail CSK</h2><p>Gửi mail hàng loạt từ tài khoản Google của bạn.</p>
+  return `<div class=login><div class=card><h2>Mail CSK</h2><p>Gửi mail hàng loạt từ tài khoản Google của bạn.</p>${LOGINERR ? `<p style="color:#b00;background:#fdecec;border:1px solid #f3b9b9;padding:8px 10px;border-radius:6px;font-size:13px">${esc(LOGINERR)}</p>` : ""}
     <button onclick=login() style="display:inline-flex;align-items:center;gap:10px;padding:10px 20px;background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:24px;font-weight:500">
     <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.2 5.5-4.7 7.2l7.6 5.900c4.400-4.100 6.900-10.100 6.900-17.600z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.100 15.900-5.800l-7.600-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>
     Đăng nhập bằng Google</button></div></div>`;
@@ -133,11 +134,11 @@ async function login() {
     try { await cfetch("GET"); }
     catch (e) {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
-      boot();
-      return alert(e.denied ? `Tài khoản ${p.email} chưa được cấp phép sử dụng. Vui lòng liên hệ quản trị viên để được thêm vào danh sách.` : "Không kiểm tra được quyền đăng nhập (" + (e.message || e) + "). Thử lại sau.");
+      LOGINERR = e.code == "forbidden" ? `Tài khoản ${p.email} chưa được cấp phép sử dụng. Vui lòng liên hệ quản trị viên để được thêm vào danh sách.` : "Không đăng nhập được: " + (e.message || e);
+      return boot();
     }
-    await loadLocal();
-  } catch (e) { alert("Đăng nhập lỗi: " + e.message); }
+    LOGINERR = ""; await loadLocal();
+  } catch (e) { LOGINERR = "Đăng nhập lỗi: " + (e.message || e); boot(); }
 }
 async function loadLocal() {
   let o = {}; try { o = JSON.parse(localStorage[dkey()] || "null") || JSON.parse(localStorage["csk:" + U.email] || "{}"); } catch (e) {}
@@ -199,9 +200,14 @@ function mergeIn(R) {
 }
 async function cfetch(method, body) {
   const t = await getTok();
-  const r = await fetch(getCloud() + "/contacts", {method, headers: {Authorization: "Bearer " + t, ...(body ? {"Content-Type": "application/json"} : {})}, body: body ? JSON.stringify(body) : undefined});
+  let r;
+  try { r = await fetch(getCloud() + "/contacts", {method, headers: {Authorization: "Bearer " + t, ...(body ? {"Content-Type": "application/json"} : {})}, body: body ? JSON.stringify(body) : undefined}); }
+  catch (e) { const er = new Error(`không kết nối được máy chủ Cloudflare. Thường do biến ORIGIN trong Worker chưa đúng với địa chỉ trang web này (${location.origin}), hoặc địa chỉ Worker sai.`); er.code = "network"; throw er; }
   if (r.status == 409) return {conflict: true, data: await r.json()};
-  if (r.status == 403 || r.status == 401) { const er = new Error("tài khoản này chưa được cấp quyền truy cập Kho chung."); er.denied = 1; throw er; }
+  if (r.status == 403 || r.status == 401) {
+    const j = await r.json().catch(() => ({})), er = new Error(j.error == "origin" ? `Worker từ chối địa chỉ trang web này (${location.origin}). Hãy đặt biến ORIGIN trong Worker đúng bằng địa chỉ này.` : "tài khoản này chưa được cấp quyền truy cập Kho chung.");
+    er.code = j.error || "forbidden"; er.denied = 1; throw er;
+  }
   if (!r.ok) throw new Error("lỗi máy chủ (" + r.status + ")");
   return {data: await r.json()};
 }
