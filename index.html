@@ -35,6 +35,13 @@ details{border:1px solid #e6e6e2;border-radius:8px;margin:8px 0;background:#fcfc
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}.stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px #0001;color:#777}.stat b{display:block;font-size:28px;color:#241c15}
 .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;background:#e4e4e0}.tag.ok{background:#d9f2dd;color:#176b2b}.prev{position:sticky;top:12px;align-self:start}ol{padding-left:20px}
 @media(max-width:700px){aside{width:100%;padding:8px}main{padding:14px}}
+.ov{position:fixed;inset:0;background:#0007;z-index:120;display:flex;align-items:center;justify-content:center;padding:16px}
+.dlg{background:#fff;border-radius:12px;padding:20px;width:min(420px,100%);box-shadow:0 10px 40px #0006}.dm{white-space:pre-line;line-height:1.5;margin-bottom:12px;font-size:15px}.di{margin-bottom:12px}
+.db{display:flex;gap:8px;justify-content:flex-end}.db .dng{background:#d33;color:#fff}
+#toasts{position:fixed;top:14px;right:14px;z-index:130;display:flex;flex-direction:column;gap:8px;width:min(380px,calc(100vw - 28px));pointer-events:none}
+.toast{pointer-events:auto;display:flex;gap:10px;align-items:flex-start;background:#241c15;color:#fff;padding:11px 14px;border-radius:10px;box-shadow:0 6px 22px #0005;border-left:5px solid #ffe01b;font-size:14px;line-height:1.45;cursor:pointer;animation:tin .22s ease-out;white-space:pre-line}
+.toast.ok{border-color:#2e9e5b}.toast.err{border-color:#e5484d}.toast .tm{flex:1}.toast .tx{opacity:.5;font-size:12px}.toast .ti{font-weight:700}
+.toast.out{opacity:0;transform:translateX(30px);transition:.25s}@keyframes tin{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:none}}
 .fl{font-size:12px;font-weight:700;color:#6b6258;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.3px}
 .pbox{max-height:260px;overflow:auto;border:1px solid #ddd;border-radius:6px;background:#fff;margin:6px 0}
 .pr{display:flex;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid #f1efe9;cursor:pointer;font-weight:400}.pr:hover{background:#faf8f2}.pr.on{background:#fff6bf}.pr.dn{opacity:.5;cursor:default}.pn{font-weight:600}
@@ -67,6 +74,37 @@ const SCOPE = "https://www.googleapis.com/auth/gmail.send https://www.googleapis
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* ---------- Thông báo nổi của web (thay hộp thoại của trình duyệt) ---------- */
+function toast(msg, type) {
+  let box = document.getElementById("toasts");
+  if (!box) { box = document.createElement("div"); box.id = "toasts"; document.body.appendChild(box); }
+  msg = String(msg ?? "");
+  type = type || (/^(Đã|Danh sách ".*": thêm)/.test(msg) ? "ok" : /lỗi|không|chưa|hết|sai|từ chối|mất kết nối/i.test(msg) ? "err" : "info");
+  const t = document.createElement("div"); t.className = "toast " + type; t.setAttribute("role", "status");
+  t.innerHTML = `<span class=ti>${{ok: "✔", err: "⚠", info: "ℹ"}[type]}</span><span class=tm></span><span class=tx>✕</span>`;
+  t.querySelector(".tm").textContent = msg;
+  const close = () => { t.classList.add("out"); setTimeout(() => t.remove(), 250); };
+  t.onclick = close; box.appendChild(t);
+  setTimeout(close, type == "err" ? 9000 : msg.length > 80 ? 7000 : 4500);
+  while (box.children.length > 4) box.firstChild.remove();
+}
+window.alert = m => toast(m);
+function dlg(msg, o = {}) {
+  return new Promise(res => {
+    const ov = document.createElement("div"); ov.className = "ov";
+    ov.innerHTML = `<div class=dlg role=dialog aria-modal=true><div class=dm></div>${o.input ? `<input class=di style="width:100%" placeholder="${esc(o.ph || "")}">` : ""}<div class=db><button class=g data-x=0>Hủy</button><button data-x=1 class="${o.danger ? "dng" : ""}">${esc(o.ok || "Đồng ý")}</button></div></div>`;
+    ov.querySelector(".dm").textContent = msg; document.body.appendChild(ov);
+    const inp = ov.querySelector(".di");
+    const done = v => { document.removeEventListener("keydown", kd, true); ov.remove(); res(v); };
+    const kd = e => { if (e.key == "Escape") done(o.input ? null : false); else if (e.key == "Enter") { e.preventDefault(); done(o.input ? inp.value : true); } };
+    document.addEventListener("keydown", kd, true);
+    ov.onclick = e => { if (e.target == ov) done(o.input ? null : false); };
+    ov.querySelectorAll("button").forEach(b => b.onclick = () => done(b.dataset.x == "1" ? (o.input ? inp.value : true) : (o.input ? null : false)));
+    (inp || ov.querySelector("button[data-x='1']")).focus();
+  });
+}
+const ask = (msg, ok, danger) => dlg(msg, {ok, danger});
+const askText = (msg, ph) => dlg(msg, {input: 1, ph, ok: "Xác nhận", danger: 1});
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const getCid = () => CID_DEFAULT || localStorage.csk_cid || "";
 const CLOUD_DEFAULT = "https://csk-mail.vnucsk.workers.dev";
@@ -148,7 +186,7 @@ async function logout() { if (RUN) return alert("Đang gửi, hãy dừng trư�
 async function wipeFiles() { const d = await idb; await new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").clear(); t.oncomplete = r; }); IMG = {}; }
 async function wipeAll() {
   if (RUN) return alert("Đang gửi, hãy dừng trước.");
-  if (prompt("Xóa liên hệ, thư, lịch sử và tệp lưu trên máy này (danh sách trên Kho chung không bị xóa). Gõ XOA để xác nhận:") !== "XOA") return;
+  if (await askText("Xóa liên hệ, thư, lịch sử và tệp lưu trên máy này (danh sách trên Kho chung không bị xóa). Gõ XOA để xác nhận:", "Gõ XOA") !== "XOA") return;
   clearTimeout(ST); delete localStorage[dkey()]; delete localStorage["csk2:" + U.email]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; FK = null; TOK = null; EXP = 0; U = null; boot();
 }
 function boot() { $("#app").innerHTML = loginView(); }
@@ -157,6 +195,7 @@ function boot() { $("#app").innerHTML = loginView(); }
 function shell() {
   $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>👥 Liên hệ</a><a data-t=camps>✏️ Soạn thư</a><a data-t=tpl>🎨 Mẫu thiết kế</a><a data-t=history>🕘 Lịch sử</a><a data-t=set>⚙️ Cài đặt</a>
     <div id=tbx>${TB}</div>
+    <div id=cst style="color:#ff9a9a;padding:0 12px;font-size:12px"></div>
     <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a></div></aside><main id=v></main>`;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
   go("contacts"); cloudSync();
@@ -174,7 +213,7 @@ const lists = () => [...new Set(D.contacts.map(c => c.list))];
 const mk = e => D.set.mask === false ? e : String(e).replace(/^(.{1,2}).*(@.*)$/, "$1•••$2");
 function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
-  return `<h2>Liên hệ</h2>${cloudBar()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
+  return `<h2>Liên hệ</h2><div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
     <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
     ${cur.list ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
@@ -184,8 +223,7 @@ function vContacts() {
 }
 /* ---------- Kho chung Cloudflare ---------- */
 let CSTAT = "", CBUSY = 0, CT;
-const CST = t => { CSTAT = t; const e = $("#cst"); if (e) e.textContent = t; };
-const cloudBar = () => getCloud() ? `<div class=card style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class=g onclick="cloudSync(1)">☁️ Đồng bộ ngay</button><span class=m id=cst>${esc(CSTAT)}</span></div>` : "";
+const CST = t => { CSTAT = t; const e = $("#cst"); if (e) e.textContent = /^Chưa/.test(t) ? "⚠ " + t : ""; }; // chỉ hiện khi lỗi
 const csync = () => { if (!getCloud()) return; clearTimeout(CT); CT = setTimeout(() => cloudSync(), 1500); };
 const slim = () => D.contacts.map(({email, name, list, unsub, u}) => ({email, name: name || "", list, ...(unsub ? {unsub: true} : {}), u: u || 0}));
 const norm = a => JSON.stringify((a || []).map(({email, name, list, unsub, u}) => [list, email, name || "", unsub ? 1 : 0, u || 0]).sort((x, y) => (x[0] + "|" + x[1]).localeCompare(y[0] + "|" + y[1])));
@@ -228,8 +266,8 @@ async function cloudSync(manual) {
   CBUSY = 0;
 }
 function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; c.u = Date.now(); save(); csync(); go(); }
-function delList() {
-  if (!cur.list || !confirm(`Xóa toàn bộ danh sách "${cur.list}" (${D.contacts.filter(c => c.list == cur.list).length} email)?`)) return;
+async function delList() {
+  if (!cur.list || !(await ask(`Xóa toàn bộ danh sách "${cur.list}" (${D.contacts.filter(c => c.list == cur.list).length} email)?`, "Xóa danh sách", 1))) return;
   (D.del ||= {})[cur.list] = Date.now(); D.contacts = D.contacts.filter(c => c.list != cur.list); cur.list = ""; save(); csync(); go();
 }
 async function importFile(f, list) {
@@ -261,7 +299,7 @@ async function impQuick() {
 const LBL = {r: "Văn bản", img: "Ảnh", btn: "Nút bấm", hr: "Đường kẻ"};
 const THEME = {outer: "#f4f4f2", bg: "#ffffff", w: 640, font: "Arial, sans-serif", size: 15, color: "#222222"};
 function fix(c) {
-  c.theme = Object.assign({}, THEME, c.theme); c.files ??= []; c.pick ??= []; if (c.list == "@pick") { c.list = ""; c.who = "pick"; } c.who ??= "all"; c.mode ??= "one"; c.cc ??= ""; c.bcc ??= ""; c.grp ??= 150;
+  c.theme = Object.assign({}, THEME, c.theme); c.files ??= []; c.pick ??= []; c.cc = ""; c.bcc = ""; if (c.list == "@pick") { c.list = ""; c.who = "pick"; } c.who ??= "all"; c.mode ??= "one"; c.cc ??= ""; c.bcc ??= ""; c.grp ??= 150;
   c.blocks = c.blocks.map(b => b.t == "h" ? {t: "r", v: `<div style="text-align:center"><b>${b.v}</b></div>`} : b.t == "p" ? {t: "r", v: String(b.v).replace(/\n/g, "<br>")} : b);
   return c;
 }
@@ -300,7 +338,7 @@ function fc(cmd, val) {
   if (cmd == "size") {
     document.execCommand("fontSize", false, 7);
     RT.querySelectorAll('font[size="7"]').forEach(f => { const sp = document.createElement("span"); sp.style.fontSize = val + "px"; sp.innerHTML = f.innerHTML; f.replaceWith(sp); });
-  } else if (cmd == "createLink") { val = prompt("Dán link (https://...)"); if (!val) return; document.execCommand(cmd, false, val); }
+  } else if (cmd == "createLink") { return lk(); }
   else document.execCommand(cmd, false, val);
   E().blocks[+RT.dataset.i].v = RT.innerHTML; upd();
 }
@@ -359,7 +397,7 @@ function vTpl() {
 }
 async function useTpl(i) {
   const t = TPL[i]; let c = E();
-  if (c && !confirm("Áp dụng mẫu \"" + t.n + "\" sẽ thay nội dung và màu sắc của thư \"" + c.name + "\". Tiếp tục?")) return;
+  if (c && !(await ask("Áp dụng mẫu \"" + t.n + "\" sẽ thay nội dung và màu sắc của thư \"" + c.name + "\". Tiếp tục?", "Áp dụng"))) return;
   if (!c) { newCamp(true); c = E(); c.name = t.n; }
   if (t.b.some(b => b.t == "img" && b.v == "tpl_vnu")) { const a = atob(TPLIMG.split(",")[1]), u = new Uint8Array(a.length); for (let k = 0; k < a.length; k++) u[k] = a.charCodeAt(k); await fput("tpl_vnu", {blob: new Blob([u], {type: "image/jpeg"}), type: "image/jpeg", name: "banner-vnu-csk.jpg"}); }
   c.theme = Object.assign({}, THEME, t.th); c.blocks = JSON.parse(JSON.stringify(t.b)); if (t.s) c.subject = t.s; save(); go("edit");
@@ -417,7 +455,7 @@ function newCamp(quiet) {
   D.camps.unshift(cur.edit); save(); if (!quiet) go("edit");
 }
 async function editC(id) { cur.edit = D.camps.find(c => c.id == id); await preload(cur.edit); go("edit"); }
-function delC(id) { if (!confirm("Xóa thư này?")) return; D.camps = D.camps.filter(c => c.id != id); if (cur.edit?.id == id) cur.edit = null; save(); go(); }
+async function delC(id) { if (!(await ask("Xóa thư này?", "Xóa thư", 1))) return; D.camps = D.camps.filter(c => c.id != id); if (cur.edit?.id == id) cur.edit = null; save(); go(); }
 
 /* Kéo thả ảnh/tệp từ máy tính */
 async function shrink(f) {
@@ -508,7 +546,6 @@ function vEdit() {
     <div class=fl>3. Cách gửi</div>
     <div class=seg>${[["bcc", "Thư chung · BCC"], ["cc", "Thư chung · CC"], ["one", "Từng người một thư"]].map(([v, l]) => `<button class="${v == ed.mode ? "on" : ""}" onclick="E().mode='${v}';save();go()">${l}</button>`).join("")}</div>
     <div class=m>${HINT[ed.mode]}${ed.mode != "one" ? ` Tối đa <input type=number min=1 max=500 style="width:62px;padding:2px 5px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> người/thư.` : ""}</div>
-    ${ed.cc || ed.bcc || cur.xc ? `<div class=rr><input placeholder="CC cố định (cách nhau dấu phẩy)" value="${esc(ed.cc)}" oninput="E().cc=this.value;save()"><input placeholder="BCC cố định (cách nhau dấu phẩy)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()"></div>` : `<a href="#" class=m onclick="cur.xc=1;go();return false">+ Thêm CC/BCC cố định</a>`}
     <div id=sp style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">${sendBox()}</div></div>
     <details ${op("t")} ontoggle="(cur.op ??= {}).t = this.open"><summary>Giao diện thư (màu, phông, cỡ chữ)</summary><div>${thm()}</div></details>
     <div class=card>
@@ -525,10 +562,7 @@ function vSet() {
     Gửi riêng: mỗi lô <input type=number value=${s.batch} style="width:70px" onchange="D.set.batch=Math.max(1,+this.value||150);save()"> mail, nghỉ <input type=number value=${s.delay} style="width:55px" onchange="D.set.delay=+this.value;save()"> phút.<br>
     Tối đa mỗi ngày <input type=number value=${s.cap} style="width:75px" onchange="D.set.cap=+this.value;save()"> người nhận.
     <div class=m>Hôm nay đã gửi: <b>${usedToday()}</b> người. Gmail giới hạn số người nhận mỗi thư và mỗi ngày tùy loại tài khoản, hãy đặt mức phù hợp với tài khoản của bạn.</div></div>
-    <div class=card><b>☁️ Kho chung</b>
-    <div class=m>Danh sách liên hệ tự động đồng bộ với Cloudflare khi đăng nhập, khi có thay đổi và mỗi 2 phút. Các tài khoản Google được cấp quyền đều thấy cùng một danh sách.</div>
-    <button class=g onclick="cloudSync(1)">☁️ Đồng bộ ngay</button> <span class=m id=cst>${esc(CSTAT)}</span></div>
-    <div class=card><label><input type=checkbox ${s.mask !== false ? "checked" : ""} onchange="D.set.mask=this.checked;save()"> Ẩn một phần email khi hiển thị trên màn hình (ab•••@gmail.com)</label><br><br>
+        <div class=card><label><input type=checkbox ${s.mask !== false ? "checked" : ""} onchange="D.set.mask=this.checked;save()"> Ẩn một phần email khi hiển thị trên màn hình (ab•••@gmail.com)</label><br><br>
     <button class=g onclick=wipeAll()>Xóa dữ liệu lưu trên máy này</button></div>`;
 }
 /* ---------- Gửi mail qua Gmail API ---------- */
@@ -583,12 +617,11 @@ const say = t => { LOG.push(new Date().toLocaleTimeString("vi") + "  " + t); con
 async function run(id) {
   if (RUN) return alert("Đang có thư đang gửi.");
   const c = D.camps.find(x => x.id == id); if (!c.subject) return alert("Thư chưa có tiêu đề.");
-  const badCc = [...tokens(c.cc), ...tokens(c.bcc)].filter(x => !isMail(x)); if (badCc.length) return alert("Email CC/BCC không hợp lệ: " + badCc.join(", "));
   const all = pend(c), room = Math.max(0, D.set.cap - usedToday()), todo = all.slice(0, room), mode = c.mode, one = mode == "one", G = one ? 1 : gsz(c);
   if (!todo.length) return alert(all.length ? "Hôm nay đã hết hạn mức gửi." : c.who == "pick" ? "Chưa chọn ai, hoặc những người đã chọn đều đã nhận thư này rồi." : "Không còn ai để gửi.");
   const units = []; for (let k = 0; k < todo.length; k += G) units.push(todo.slice(k, k + G));
-  if (!confirm(`Gửi thư "${c.name}" cho ${todo.length} người${c.who == "pick" ? " đã chọn" : ""}, chia thành ${units.length} thư${one ? " (mỗi người một thư riêng)" : ` (${mode == "bcc" ? "BCC" : "CC"}, tối đa ${G} người/thư)`}?`)) return;
-  const ccL = mails(c.cc), bccL = mails(c.bcc), per = one ? Math.max(1, D.set.batch) : 1;
+  if (!(await ask(`Gửi thư "${c.name}" cho ${todo.length} người${c.who == "pick" ? " đã chọn" : ""}, chia thành ${units.length} thư${one ? " (mỗi người một thư riêng)" : ` (${mode == "bcc" ? "BCC" : "CC"}, tối đa ${G} người/thư)`}?`, "Gửi ngay"))) return;
+  const per = one ? Math.max(1, D.set.batch) : 1;
   RUN = 1; STOP = 0; LOG = []; let fails = 0;
   say(`Còn ${all.length} người chưa gửi. Hôm nay còn được gửi ${room} người. Sẽ gửi ${units.length} thư.`);
   try {
@@ -596,7 +629,7 @@ async function run(id) {
     for (let n = 0; n < units.length && !STOP && fails < 5; n++) {
       const u = units[n], [s, h] = personal(c, one ? u[0] : {name: ""}), em = u.map(x => x.email);
       const to = one ? `${u[0].name ? hdr(u[0].name) + " " : ""}<${u[0].email}>` : `<${U.email}>`;
-      const me = U.email.toLowerCase(), cc = [...new Set([...(mode == "cc" ? em : []), ...ccL])].filter(x => one || x.toLowerCase() != me), bcc = [...new Set([...(mode == "bcc" ? em : []), ...bccL])].filter(x => one || x.toLowerCase() != me);
+      const me = U.email.toLowerCase(), cc = [...new Set([...(mode == "cc" ? em : [])])].filter(x => one || x.toLowerCase() != me), bcc = [...new Set([...(mode == "bcc" ? em : [])])].filter(x => one || x.toLowerCase() != me);
       let ok = 1, err = "";
       try { await gsend(mime(to, s, h, A, cc, bcc)); fails = 0; } catch (e) { ok = 0; err = e.message; say(`Lỗi ${one ? em[0] : "thư " + (n + 1) + " (" + em.length + " người)"}: ${err}`); fails++; }
       const at = new Date().toLocaleString("sv"), batch = one ? Math.floor(n / per) + 1 : n + 1;
