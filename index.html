@@ -168,16 +168,15 @@ async function login() {
   client = google.accounts.oauth2.initTokenClient({client_id: getCid(), scope: SCOPE, callback: () => {}});
   try {
     await getTok("select_account");
-    const p = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}})).json();
+    const [p, me0] = await Promise.all([fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}}).then(r => r.json()), getCloud() ? api("GET", "/me").catch(() => null) : null]);
     U = {email: p.email, name: p.name || p.email};
-    ME = null;
-    if (getCloud()) { try { ME = await api("GET", "/me"); } catch (e) { ME = null; } }
+    ME = me0;
     if (ME && ME.status && ME.status != "active") {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
       LOGINERR = ME.status == "pending" ? `Tài khoản ${p.email} chưa được duyệt. Yêu cầu đã gửi tới quản trị viên, bạn sẽ đăng nhập được sau khi được duyệt. Nếu bạn là quản trị viên: hãy kiểm tra biến ADMIN_EMAILS của Worker có đúng email ${p.email} không.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên.`;
       ME = null; return boot();
     }
-    try { await cfetch("GET"); }
+    try { if (!ME) await cfetch("GET"); }
     catch (e) {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
       LOGINERR = e.code == "forbidden" ? `Tài khoản ${p.email} chưa được cấp phép sử dụng. Vui lòng liên hệ quản trị viên để được thêm vào danh sách.` : "Không đăng nhập được: " + (e.message || e);
