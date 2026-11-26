@@ -64,6 +64,7 @@ aside .me{margin-top:auto}
 #tbx select{padding:4px;margin:0;flex:1;min-width:0}
 #tbx .cl{display:flex;align-items:center;gap:6px;color:#e6e1da;font-size:13px;background:#ffffff12;border-radius:4px;padding:3px 8px}
 @media(max-width:700px){aside{position:static;height:auto;width:100%}#tbx{width:100%}}
+.tag.no{background:#fde0e0;color:#a11}
 </style>
 </head>
 <body>
@@ -92,7 +93,7 @@ window.alert = m => toast(m);
 function dlg(msg, o = {}) {
   return new Promise(res => {
     const ov = document.createElement("div"); ov.className = "ov";
-    ov.innerHTML = `<div class=dlg role=dialog aria-modal=true><div class=dm></div>${o.input ? `<input class=di style="width:100%" placeholder="${esc(o.ph || "")}">` : ""}<div class=db><button class=g data-x=0>Hủy</button><button data-x=1 class="${o.danger ? "dng" : ""}">${esc(o.ok || "Đồng ý")}</button></div></div>`;
+    ov.innerHTML = `<div class=dlg role=dialog aria-modal=true><div class=dm></div>${o.input ? `<input class=di style="width:100%" placeholder="${esc(o.ph || "")}" value="${esc(o.val || "")}">` : ""}<div class=db><button class=g data-x=0>Hủy</button><button data-x=1 class="${o.danger ? "dng" : ""}">${esc(o.ok || "Đồng ý")}</button></div></div>`;
     ov.querySelector(".dm").textContent = msg; document.body.appendChild(ov);
     const inp = ov.querySelector(".di");
     const done = v => { document.removeEventListener("keydown", kd, true); ov.remove(); res(v); };
@@ -100,7 +101,7 @@ function dlg(msg, o = {}) {
     document.addEventListener("keydown", kd, true);
     ov.onclick = e => { if (e.target == ov) done(o.input ? null : false); };
     ov.querySelectorAll("button").forEach(b => b.onclick = () => done(b.dataset.x == "1" ? (o.input ? inp.value : true) : (o.input ? null : false)));
-    (inp || ov.querySelector("button[data-x='1']")).focus();
+    (inp || ov.querySelector("button[data-x='1']")).focus(); inp?.select();
   });
 }
 const ask = (msg, ok, danger) => dlg(msg, {ok, danger});
@@ -169,6 +170,13 @@ async function login() {
     await getTok("select_account");
     const p = await (await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {headers: {Authorization: "Bearer " + TOK}})).json();
     U = {email: p.email, name: p.name || p.email};
+    ME = null;
+    if (getCloud()) { try { ME = await api("GET", "/me"); } catch (e) { ME = null; } }
+    if (ME && ME.status && ME.status != "active") {
+      const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
+      LOGINERR = ME.status == "pending" ? `Yêu cầu truy cập của ${p.email} đã được gửi tới quản trị viên. Bạn sẽ đăng nhập được sau khi được duyệt.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên.`;
+      ME = null; return boot();
+    }
     try { await cfetch("GET"); }
     catch (e) {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
@@ -193,19 +201,20 @@ function boot() { $("#app").innerHTML = loginView(); }
 
 /* ---------- Khung chính ---------- */
 function shell() {
-  $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>👥 Liên hệ</a><a data-t=camps>✏️ Soạn thư</a><a data-t=tpl>🎨 Mẫu thiết kế</a><a data-t=history>🕘 Lịch sử</a><a data-t=set>⚙️ Cài đặt</a>
+  $("#app").innerHTML = `<aside><h1>Mail CSK</h1><a data-t=contacts>👥 Liên hệ</a><a data-t=camps>✏️ Soạn thư</a><a data-t=tpl>🎨 Mẫu thiết kế</a><a data-t=history>🕘 Lịch sử</a><a data-t=set>⚙️ Cài đặt</a>${ME?.role == "admin" ? `<a data-t=users>🛡️ Tài khoản <span id=ub class=chip style="display:none"></span></a>` : ""}
     <div id=tbx>${TB}</div>
     <div id=cst style="color:#ff9a9a;padding:0 12px;font-size:12px"></div>
-    <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a></div></aside><main id=v></main>`;
+    <div class=me>${esc(U.name)}<br>${esc(U.email)}<br>${ME ? `<span class=tag style="margin:4px 0;display:inline-block">${ME.role == "admin" ? "Quản trị viên" : "Thành viên"}</span><br>` : ""}<a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a></div></aside><main id=v></main>`;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
-  go("contacts"); cloudSync();
+  go("contacts"); cloudSync(); if (ME?.role == "admin") pollPending(true);
 }
 function go(t) {
-  tab = t || tab; RT = null;
+  tab = t || tab; if (tab == "users" && ME?.role != "admin") tab = "contacts"; RT = null;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.className = (a.dataset.t == tab || (tab == "edit" && a.dataset.t == "camps")) ? "on" : "");
-  $("#v").innerHTML = {contacts: vContacts, camps: vCamps, tpl: vTpl, edit: vEdit, history: vHist, set: vSet}[tab]();
+  $("#v").innerHTML = {contacts: vContacts, camps: vCamps, tpl: vTpl, edit: vEdit, history: vHist, set: vSet, users: vUsers}[tab]();
   $("#tbx").style.display = (tab == "edit" && cur.edit) ? "block" : "none";
   if (cur.edit && tab == "edit") { upd(true); if (cur.edit.who == "pick") refPick(); }
+  if (tab == "tpl") loadShared(); if (tab == "users") loadUsersView();
 }
 
 /* ---------- Liên hệ ---------- */
@@ -391,7 +400,7 @@ const TPL = [
 ];
 const prev = t => html({theme: Object.assign({}, THEME, t.th), blocks: t.b}, "preview").replace(/{{ten}}/g, "Nguyễn Văn A");
 function vTpl() {
-  return `<h2>Mẫu thiết kế</h2><div class=m>${E() ? `Bấm vào một mẫu để áp dụng cho thư "<b>${esc(E().name)}</b>".` : "Bấm vào một mẫu để tạo thư mới từ mẫu đó."} Sau đó bạn sửa chữ, màu, thêm ảnh và nút tùy ý.</div>
+  return `<h2>Mẫu thiết kế</h2>${sharedBox()}<h3 style="margin:22px 0 4px">Mẫu có sẵn</h3><div class=m>${E() ? `Bấm vào một mẫu để áp dụng cho thư "<b>${esc(E().name)}</b>".` : "Bấm vào một mẫu để tạo thư mới từ mẫu đó."} Sau đó bạn sửa chữ, màu, thêm ảnh và nút tùy ý.</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:10px">${TPL.map((t, i) => `<div onclick="useTpl(${i})" style="cursor:pointer;border:1px solid #ddd;border-radius:8px;overflow:hidden;background:#fff">
     <div style="height:300px;overflow:hidden"><iframe style="width:640px;height:860px;border:0;border-radius:0;transform:scale(.35);transform-origin:0 0;pointer-events:none" srcdoc="${esc(prev(t))}"></iframe></div><div style="padding:8px 10px"><b>${t.n}</b></div></div>`).join("")}</div>`;
 }
@@ -536,7 +545,7 @@ function vEdit() {
   const op = k => (cur.op?.[k] ?? k == "s") ? "open" : "";
   return `<h2>Soạn thư</h2><div class=row><div ondragover="event.preventDefault()" ondrop="drop(event)">
     <div class=card><input style="width:100%" placeholder="Tên thư (chỉ để bạn dễ nhớ)" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
-    <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()"></div>
+    <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">${ME ? `<div style="margin-top:6px"><button class=g onclick=saveShared()>💾 Lưu làm mẫu chung</button> <span class=m>Các tài khoản khác sẽ xem và dùng được mẫu này.</span></div>` : ""}</div>
     <div class=card><b>Người nhận</b> <span class=m>· danh sách lấy từ tab <a href="#" onclick="go('contacts');return false">Liên hệ</a></span>
     <div class=fl>1. Danh sách</div>
     <select style="width:100%" onchange="E().list=this.value;save();go()"><option value="">Tất cả liên hệ (${D.contacts.filter(c => !c.unsub).length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l && !c.unsub).length})</option>`).join("")}</select>
@@ -661,6 +670,196 @@ function exp() {
   const nm = id => D.camps.find(c => c.id == id)?.name || "(đã xóa)";
   const rows = D.sent.map(s => ({"Thư": nm(s.cid), Email: s.email, "Tên": s.name, "Trạng thái": s.ok ? "Đã gửi" : "Lỗi", "Lỗi": s.err || "", "Thời gian gửi": s.at, "Thư số": s.batch}));
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lịch sử"); XLSX.writeFile(wb, "lich_su_gui_mail.xlsx");
+}
+/* ---------- Quản trị: phân quyền Admin, duyệt tài khoản, mẫu thư chung (cần Worker hỗ trợ) ---------- */
+let ME = null, USERS = [], PENDN = 0, SHARED = [], SHCACHE = {};
+async function api(method, path, body) {
+  const t = await getTok();
+  let r;
+  try { r = await fetch(getCloud() + path, {method, headers: {Authorization: "Bearer " + t, ...(body ? {"Content-Type": "application/json"} : {})}, body: body ? JSON.stringify(body) : undefined}); }
+  catch (e) { const er = new Error("không kết nối được máy chủ."); er.code = "network"; throw er; }
+  if (r.status == 404) { const er = new Error("Worker chưa được cập nhật để hỗ trợ tính năng này."); er.code = "nosupport"; throw er; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const er = new Error(j.message || j.error || "lỗi máy chủ (" + r.status + ")"); er.code = j.error || r.status; throw er; }
+  return j;
+}
+/* Làm sạch nội dung mẫu do người khác chia sẻ: bỏ script, sự kiện onclick..., link nguy hiểm */
+const HEXC = /^#[0-9a-f]{3,8}$/i, SAFEU = u => /^(https?:|mailto:|tel:)/i.test(String(u || "").trim()) ? String(u).trim() : "";
+function cleanHtml(h) {
+  const d = new DOMParser().parseFromString("<body>" + String(h ?? "") + "</body>", "text/html");
+  d.querySelectorAll("script,style,iframe,frame,object,embed,link,meta,base,form,input,button,textarea,select,svg,math,template,noscript").forEach(n => n.remove());
+  d.body.querySelectorAll("*").forEach(n => {
+    for (const a of [...n.attributes]) {
+      const k = a.name.toLowerCase(), v = a.value.trim();
+      if (k.startsWith("on") || k == "srcdoc" || k == "formaction") n.removeAttribute(a.name);
+      else if ((k == "href" || k == "src" || k == "action" || k == "xlink:href") && !(/^(https?:|mailto:|tel:|#)/i.test(v) || (k == "src" && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(v)))) n.removeAttribute(a.name);
+      else if (k == "style" && /url\s*\(|expression|javascript:|@import|behavior/i.test(v)) n.removeAttribute(a.name);
+    }
+  });
+  return d.body.innerHTML;
+}
+function cleanTpl(t) {
+  const th = t.th || {}, T = {};
+  ["outer", "bg", "color"].forEach(k => { if (HEXC.test(th[k] || "")) T[k] = th[k]; });
+  if (/^[\w ,'\-]{1,80}$/.test(th.font || "")) T.font = th.font;
+  if (+th.size >= 8 && +th.size <= 40) T.size = +th.size;
+  if (+th.w >= 320 && +th.w <= 900) T.w = +th.w;
+  const b = (Array.isArray(t.b) ? t.b : []).slice(0, 60).map(x => {
+    if (!x || typeof x != "object") return null;
+    const o = {t: x.t};
+    if (x.t == "r") { o.v = cleanHtml(x.v); if (HEXC.test(x.bg || "")) o.bg = x.bg; if (x.pad != null && +x.pad >= 0 && +x.pad <= 80) o.pad = +x.pad; }
+    else if (x.t == "img") { o.v = /^[\w-]{1,40}$/.test(x.v || "") ? x.v : ""; o.u = SAFEU(x.u); }
+    else if (x.t == "btn") { o.v = String(x.v ?? "").slice(0, 80); o.u = SAFEU(x.u) || "https://"; if (HEXC.test(x.bg || "")) o.bg = x.bg; if (HEXC.test(x.fg || "")) o.fg = x.fg; }
+    else if (x.t == "hr") { o.v = ""; o.u = ""; }
+    else return null;
+    return o;
+  }).filter(Boolean);
+  return {n: String(t.n || "").slice(0, 80), s: String(t.s || "").slice(0, 200), th: T, b};
+}
+/* Hộp thoại nhiều ô nhập, cùng kiểu với hộp thoại nổi của web */
+function formDlg(title, fields, ok) {
+  return new Promise(res => {
+    const ov = document.createElement("div"); ov.className = "ov";
+    ov.innerHTML = `<div class=dlg role=dialog aria-modal=true><div class=dm style="font-weight:700"></div><div class=ff></div><div class=db style="margin-top:14px"><button class=g data-x=0>Hủy</button><button data-x=1>${esc(ok || "Lưu")}</button></div></div>`;
+    ov.querySelector(".dm").textContent = title;
+    ov.querySelector(".ff").innerHTML = fields.map(f => `<div class=fl>${esc(f.label)}</div>` + (f.options
+      ? `<select data-k="${f.k}" style="width:100%" ${f.dis ? "disabled" : ""}>${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v == f.val ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`
+      : `<input data-k="${f.k}" style="width:100%" value="${esc(f.val || "")}" placeholder="${esc(f.ph || "")}" ${f.dis ? "disabled" : ""}>`)).join("");
+    document.body.appendChild(ov);
+    const get = () => Object.fromEntries([...ov.querySelectorAll("[data-k]")].map(e => [e.dataset.k, e.value.trim()]));
+    const done = v => { document.removeEventListener("keydown", kd, true); ov.remove(); res(v); };
+    const kd = e => { if (e.key == "Escape") done(null); else if (e.key == "Enter" && e.target.tagName != "SELECT") { e.preventDefault(); done(get()); } };
+    document.addEventListener("keydown", kd, true);
+    ov.onclick = e => { if (e.target == ov) done(null); };
+    ov.querySelectorAll("button").forEach(b => b.onclick = () => done(b.dataset.x == "1" ? get() : null));
+    (ov.querySelector("input:not([disabled])") || ov.querySelector("button[data-x='1']")).focus();
+  });
+}
+/* ----- Tab Tài khoản (chỉ Admin) ----- */
+const fdt = s => s ? new Date(s).toLocaleString("vi") : "";
+const uenc = u => encodeURIComponent(u.email);
+function vUsers() { return `<h2>Quản lý tài khoản</h2><div id=ulist class=m>Đang tải...</div>`; }
+async function loadUsersView() {
+  try { USERS = (await api("GET", "/users")).users || []; PENDN = USERS.filter(u => u.status == "pending").length; renderUsers(); updBadge(); }
+  catch (e) { const b = $("#ulist"); if (b) b.innerHTML = `<div class=card>Không tải được danh sách tài khoản: ${esc(e.message)}</div>`; }
+}
+function updBadge() { const b = $("#ub"); if (!b) return; const n = USERS.filter(u => u.status == "pending").length; b.textContent = n; b.style.display = n ? "inline-block" : "none"; }
+function renderUsers() {
+  const b = $("#ulist"); if (!b) return;
+  const P = USERS.filter(u => u.status == "pending"), A = USERS.filter(u => u.status != "pending");
+  const stag = u => u.status == "active" ? `<span class="tag ok">Được dùng</span>` : `<span class="tag no">Bị từ chối</span>`;
+  b.innerHTML = `<div class=card><b>Chờ duyệt (${P.length})</b>
+    ${P.length ? `<table><tr><th>Tên<th>Email<th>Gửi yêu cầu lúc<th></tr>${P.map(u => `<tr><td>${esc(u.name)}<td>${esc(u.email)}<td>${esc(fdt(u.addedAt))}
+      <td style="white-space:nowrap"><button onclick="userOk(${USERS.indexOf(u)})">Duyệt</button> <button class=g onclick="userNo(${USERS.indexOf(u)})">Từ chối</button></tr>`).join("")}</table>`
+      : `<div class=m style="margin-top:6px">Không có yêu cầu nào đang chờ. Khi có người đăng nhập bằng tài khoản mới, yêu cầu sẽ hiện ở đây.</div>`}</div>
+    <div class=card><b>Tài khoản (${A.length})</b> <button onclick=userAdd()>+ Thêm tài khoản</button>
+    <table><tr><th>Tên<th>Email<th>Quyền<th>Trạng thái<th>Đăng nhập gần nhất<th></tr>${A.map(u => { const i = USERS.indexOf(u), self = u.email == U.email;
+      return `<tr><td>${esc(u.name)}${u.note ? `<br><span class=m>${esc(u.note)}</span>` : ""}<td>${esc(u.email)}<td>${u.role == "admin" ? "Quản trị viên" : "Thành viên"}<td>${stag(u)}<td>${esc(fdt(u.lastLogin))}
+      <td style="white-space:nowrap"><button class=g onclick="userEdit(${i})">Sửa</button> ${u.fixed || self ? "" : `<button class=g onclick="userDel(${i})">Xóa</button>`}</tr>`; }).join("")}</table></div>`;
+}
+async function userSet(i, patch, okMsg) {
+  const u = USERS[i]; if (!u) return;
+  try { await api("PATCH", "/users/" + uenc(u), patch); alert(okMsg); await loadUsersView(); }
+  catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+function userOk(i) { return userSet(i, {status: "active"}, "Đã duyệt tài khoản " + USERS[i].email + "."); }
+async function userNo(i) {
+  const u = USERS[i]; if (!u || !(await ask(`Từ chối tài khoản ${u.email}? Người này sẽ không đăng nhập được.`, "Từ chối", 1))) return;
+  userSet(i, {status: "rejected"}, "Đã từ chối " + u.email + ".");
+}
+async function userEdit(i) {
+  const u = USERS[i]; if (!u) return;
+  const lock = u.fixed || u.email == U.email;
+  const f = await formDlg("Sửa tài khoản " + u.email, [
+    {k: "name", label: "Tên hiển thị", val: u.name},
+    {k: "note", label: "Ghi chú", val: u.note || "", ph: "VD: Phòng Truyền thông"},
+    {k: "role", label: "Quyền", val: u.role, options: [["member", "Thành viên"], ["admin", "Quản trị viên"]], dis: lock},
+    {k: "status", label: "Trạng thái", val: u.status, options: [["active", "Được dùng"], ["rejected", "Khóa (từ chối)"]], dis: lock}]);
+  if (!f) return;
+  if (!f.name) return toast("Tên hiển thị không được để trống.", "err");
+  userSet(i, {name: f.name, note: f.note, ...(lock ? {} : {role: f.role, status: f.status})}, "Đã lưu thông tin " + u.email + ".");
+}
+async function userDel(i) {
+  const u = USERS[i]; if (!u || !(await ask(`Xóa tài khoản ${u.email}?\nNgười này sẽ mất quyền truy cập và phải gửi yêu cầu để được duyệt lại nếu muốn quay lại. Dữ liệu đã lưu trên máy của họ không bị xóa.`, "Xóa tài khoản", 1))) return;
+  try { await api("DELETE", "/users/" + uenc(u)); alert("Đã xóa tài khoản " + u.email + "."); await loadUsersView(); }
+  catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+async function userAdd() {
+  const f = await formDlg("Thêm tài khoản (được dùng ngay, không cần duyệt)", [{k: "email", label: "Email Google", ph: "ten@gmail.com"}, {k: "name", label: "Tên hiển thị", ph: "Nguyễn Văn A"}, {k: "note", label: "Ghi chú (tùy chọn)", ph: "VD: Phòng Truyền thông"}], "Thêm");
+  if (!f) return; if (!isMail(f.email.toLowerCase())) return toast("Email không hợp lệ.", "err");
+  try { await api("POST", "/users", f); alert("Đã thêm tài khoản " + f.email + "."); await loadUsersView(); }
+  catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+async function pollPending(first) {
+  if (ME?.role != "admin") return;
+  try {
+    USERS = (await api("GET", "/users")).users || [];
+    const n = USERS.filter(u => u.status == "pending").length;
+    if (n && (first || n > PENDN)) toast(`Có ${n} tài khoản đang chờ bạn duyệt. Mở mục Tài khoản để xem.`, "info");
+    PENDN = n; updBadge(); if (tab == "users") renderUsers();
+  } catch (e) {}
+}
+setInterval(() => { if (ME?.role == "admin" && canAuto()) pollPending(); }, 120000);
+/* ----- Mẫu thư chung ----- */
+const sharedBox = () => ME && getCloud() ? `<h3 style="margin:6px 0 4px">Mẫu chung</h3><div class=m>Mẫu do các tài khoản được duyệt lưu lại, ai cũng xem và dùng được.</div><div id=stpl style="margin-top:10px">Đang tải...</div>` : "";
+async function getShared(id) {
+  const s = SHARED.find(x => x.id == id);
+  if (SHCACHE[id] && SHCACHE[id].at == s?.at) return SHCACHE[id].t;
+  const r = (await api("GET", "/templates/" + encodeURIComponent(id))).template || {}, t = cleanTpl(r);
+  t.imgs = {};
+  for (const [k, m] of Object.entries(r.imgs || {})) {
+    if (!/^[\w-]{1,40}$/.test(k) || !m || !/^image\/(png|jpeg|gif|webp)$/.test(m.type) || !/^[A-Za-z0-9+\/]+=*$/.test(m.b64 || "")) continue;
+    t.imgs[k] = {type: m.type, name: String(m.name || k).slice(0, 80), b64: m.b64};
+    if (!IMG[k]) IMG[k] = {url: `data:${m.type};base64,${m.b64}`, name: t.imgs[k].name};
+  }
+  SHCACHE[id] = {at: s?.at, t}; return t;
+}
+async function loadShared() {
+  const box = $("#stpl"); if (!box) return;
+  try {
+    SHARED = ((await api("GET", "/templates")).templates || []).filter(s => /^[\w-]{1,40}$/.test(s.id || ""));
+    await Promise.all(SHARED.map(s => getShared(s.id).catch(() => null)));
+    renderShared();
+  } catch (e) { box.innerHTML = `<div class=m>Không tải được mẫu chung: ${esc(e.message)}</div>`; }
+}
+function renderShared() {
+  const box = $("#stpl"); if (!box) return;
+  const L = SHARED.filter(s => SHCACHE[s.id]);
+  box.innerHTML = L.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px">${L.map(s => {
+    const can = s.by == U.email || ME.role == "admin";
+    return `<div onclick="useShared('${s.id}')" style="cursor:pointer;border:1px solid #ddd;border-radius:8px;overflow:hidden;background:#fff">
+      <div style="height:300px;overflow:hidden"><iframe sandbox style="width:640px;height:860px;border:0;border-radius:0;transform:scale(.35);transform-origin:0 0;pointer-events:none" srcdoc="${esc(prev(SHCACHE[s.id].t))}"></iframe></div>
+      <div style="padding:8px 10px"><b>${esc(s.n)}</b><div class=m>${esc(s.byName || s.by)} · ${esc(new Date(s.at).toLocaleDateString("vi"))}${can ? ` · <a href="#" onclick="delShared('${s.id}');event.stopPropagation();return false">Xóa</a>` : ""}</div></div></div>`; }).join("")}</div>`
+    : `<div class=m>Chưa có mẫu chung nào. Mở một thư đã soạn xong rồi bấm "Lưu làm mẫu chung".</div>`;
+}
+async function saveShared() {
+  const c = E(); if (!c) return;
+  const name = await dlg("Lưu thư này làm mẫu chung để các tài khoản khác cùng xem và dùng.\nĐặt tên cho mẫu:", {input: 1, ph: "Tên mẫu", val: c.name, ok: "Lưu mẫu"});
+  if (name === null) return; if (!name.trim()) return toast("Nhập tên mẫu.", "err");
+  try {
+    const imgs = {};
+    for (const id of new Set(c.blocks.filter(b => b.t == "img" && b.v && b.v != "tpl_vnu").map(b => b.v))) { const r = await fget(id); if (r) imgs[id] = {type: r.type, name: r.name || id, b64: await b64blob(r.blob)}; }
+    const body = {...cleanTpl({n: name.trim(), s: c.subject, th: c.theme, b: c.blocks}), imgs};
+    if (JSON.stringify(body).length > 1.5e6) return toast("Mẫu quá nặng vì ảnh lớn. Hãy dùng ít ảnh hoặc ảnh nhỏ hơn.", "err");
+    await api("POST", "/templates", body); SHCACHE = {};
+    alert(`Đã lưu mẫu chung "${body.n}".${c.files.length ? " Tệp đính kèm không được lưu theo mẫu." : ""}`);
+  } catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+async function useShared(id) {
+  let c = E(); const s = SHARED.find(x => x.id == id); if (!s) return;
+  if (c && !(await ask("Áp dụng mẫu \"" + s.n + "\" sẽ thay nội dung và màu sắc của thư \"" + c.name + "\". Tiếp tục?", "Áp dụng"))) return;
+  try {
+    const t = await getShared(id);
+    if (!c) { newCamp(true); c = E(); c.name = t.n; }
+    for (const [k, m] of Object.entries(t.imgs)) { const blob = new Blob([s2b(m.b64)], {type: m.type}); await fput(k, {blob, type: m.type, name: m.name}); IMG[k] = {url: URL.createObjectURL(blob), name: m.name}; }
+    if (t.b.some(b => b.t == "img" && b.v == "tpl_vnu")) { const u = s2b(TPLIMG.split(",")[1]); await fput("tpl_vnu", {blob: new Blob([u], {type: "image/jpeg"}), type: "image/jpeg", name: "banner-vnu-csk.jpg"}); }
+    c.theme = Object.assign({}, THEME, t.th); c.blocks = JSON.parse(JSON.stringify(t.b)); if (t.s) c.subject = t.s; save(); go("edit");
+  } catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+async function delShared(id) {
+  const s = SHARED.find(x => x.id == id); if (!s || !(await ask(`Xóa mẫu chung "${s.n}"? Tất cả tài khoản sẽ không còn thấy mẫu này.`, "Xóa mẫu", 1))) return;
+  try { await api("DELETE", "/templates/" + encodeURIComponent(id)); SHCACHE = {}; alert("Đã xóa mẫu \"" + s.n + "\"."); loadShared(); }
+  catch (e) { toast("Lỗi: " + e.message, "err"); }
 }
 /* Tự đồng bộ Kho chung, lưu khi rời trang, cảnh báo khi đang gửi */
 const canAuto = () => D && !RUN && !document.hidden && getCloud() && TOK && Date.now() < EXP - 60000;
