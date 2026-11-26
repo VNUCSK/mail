@@ -35,7 +35,12 @@ details{border:1px solid #e6e6e2;border-radius:8px;margin:8px 0;background:#fcfc
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}.stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px #0001;color:#777}.stat b{display:block;font-size:28px;color:#241c15}
 .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;background:#e4e4e0}.tag.ok{background:#d9f2dd;color:#176b2b}.prev{position:sticky;top:12px;align-self:start}ol{padding-left:20px}
 @media(max-width:700px){aside{width:100%;padding:8px}main{padding:14px}}
-.pbox{max-height:240px;overflow:auto;border:1px solid #ddd;border-radius:6px;background:#fff;margin:6px 0}.pbox label{display:flex;gap:8px;align-items:center;padding:4px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-weight:400}
+.fl{font-size:12px;font-weight:700;color:#6b6258;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.3px}
+.pbox{max-height:260px;overflow:auto;border:1px solid #ddd;border-radius:6px;background:#fff;margin:6px 0}
+.pr{display:flex;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid #f1efe9;cursor:pointer;font-weight:400}.pr:hover{background:#faf8f2}.pr.on{background:#fff6bf}.pr.dn{opacity:.5;cursor:default}.pn{font-weight:600}
+.ph{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding:6px 10px;background:#f6f4ee;border:1px solid #ddd;border-radius:6px}.mc{display:flex;gap:6px;align-items:center;white-space:nowrap;cursor:pointer}
+.ph input:not([type]){flex:1;min-width:140px}.chip{background:#1f4fbf;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;white-space:nowrap}
+.seg button{padding:7px 4px;font-size:13px}
 .rcp{margin:10px 0}.rr{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.rr>*{flex:1;min-width:140px}
 .seg{display:flex;border:1px solid #bbb;border-radius:6px;overflow:hidden;margin:6px 0}.seg button{flex:1;border-radius:0;background:#fff;font-weight:500}.seg button.on{background:#ffe01b;font-weight:700}
 .sum{background:#f1f7ff;border-radius:6px;padding:6px 10px;margin:6px 0;font-size:13px}
@@ -160,7 +165,7 @@ function go(t) {
   document.querySelectorAll("aside a[data-t]").forEach(a => a.className = (a.dataset.t == tab || (tab == "edit" && a.dataset.t == "camps")) ? "on" : "");
   $("#v").innerHTML = {contacts: vContacts, camps: vCamps, tpl: vTpl, edit: vEdit, history: vHist, set: vSet}[tab]();
   $("#tbx").style.display = (tab == "edit" && cur.edit) ? "block" : "none";
-  if (cur.edit && tab == "edit") upd(true);
+  if (cur.edit && tab == "edit") { upd(true); if (cur.edit.who == "pick") refPick(); }
 }
 
 /* ---------- Liên hệ ---------- */
@@ -250,7 +255,7 @@ async function impQuick() {
 const LBL = {r: "Văn bản", img: "Ảnh", btn: "Nút bấm", hr: "Đường kẻ"};
 const THEME = {outer: "#f4f4f2", bg: "#ffffff", w: 640, font: "Arial, sans-serif", size: 15, color: "#222222"};
 function fix(c) {
-  c.theme = Object.assign({}, THEME, c.theme); c.files ??= []; c.pick ??= []; c.mode ??= "one"; c.cc ??= ""; c.bcc ??= ""; c.grp ??= 150;
+  c.theme = Object.assign({}, THEME, c.theme); c.files ??= []; c.pick ??= []; if (c.list == "@pick") { c.list = ""; c.who = "pick"; } c.who ??= "all"; c.mode ??= "one"; c.cc ??= ""; c.bcc ??= ""; c.grp ??= 150;
   c.blocks = c.blocks.map(b => b.t == "h" ? {t: "r", v: `<div style="text-align:center"><b>${b.v}</b></div>`} : b.t == "p" ? {t: "r", v: String(b.v).replace(/\n/g, "<br>")} : b);
   return c;
 }
@@ -430,10 +435,11 @@ async function addFiles(fs, at) {
 function drop(e, at) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], at); }
 function pst(e, at) { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs, at); } }
 
-const lname = c => c.list == "@pick" ? "Người đã chọn" : (c.list || "Tất cả");
-const pend = (c, fp) => {
-  const done = new Set(D.sent.filter(s => s.cid == c.id && s.ok).map(s => s.email)), pk = new Set(c.pick || []), only = fp || c.list == "@pick", m = new Map();
-  D.contacts.filter(x => !x.unsub && (only ? pk.has(x.email) : (!c.list || x.list == c.list)) && !done.has(x.email)).forEach(x => m.has(x.email) || m.set(x.email, x));
+const lname = c => (c.list || "Tất cả") + (c.who == "pick" ? ` (chọn ${pend(c).length} người)` : "");
+const doneSet = c => new Set(D.sent.filter(s => s.cid == c.id && s.ok).map(s => s.email));
+const pend = c => {
+  const done = doneSet(c), pk = new Set(c.pick || []), m = new Map();
+  D.contacts.filter(x => !x.unsub && (!c.list || x.list == c.list) && (c.who != "pick" || pk.has(x.email)) && !done.has(x.email)).forEach(x => m.has(x.email) || m.set(x.email, x));
   return [...m.values()];
 };
 const gsz = c => Math.min(500, Math.max(1, +c.grp || 150));
@@ -445,46 +451,60 @@ function plan(c) {
 function vCamps() {
   const kind = c => ({one: "Riêng từng người", bcc: `BCC · ${gsz(c)} người/thư`, cc: `CC · ${gsz(c)} người/thư`}[c.mode]);
   return `<h2>Soạn thư</h2><p><button onclick=newCamp()>+ Soạn thư mới</button> <span class=m>Hôm nay đã gửi cho <b>${usedToday()}</b>/${D.set.cap} người. Giữ tab này mở trong lúc gửi.</span></p>
-    ${D.camps.length ? "" : `<div class=card>Chưa có thư nào. Bấm <b>+ Soạn thư mới</b>, chọn danh sách (hoặc tải thẳng file Excel) rồi bấm Gửi.</div>`}
+    ${D.camps.length ? "" : `<div class=card>Chưa có thư nào. Bấm <b>+ Soạn thư mới</b>, chọn danh sách đã lưu ở tab Liên hệ rồi bấm Gửi.</div>`}
     <table><tr><th>Thư<th>Danh sách<th>Kiểu gửi<th>Chưa gửi<th>Đã gửi<th>Lỗi<th></tr>${D.camps.map(c => { const p = pend(c).length; return `<tr><td>${esc(c.name)}<br><span class=m>${esc(c.subject)}</span><td>${esc(lname(c))}<td>${kind(c)}
     <td>${p} người → ${nMsg(c, p)} thư<td>${D.sent.filter(x => x.cid == c.id && x.ok).length}<td>${D.sent.filter(x => x.cid == c.id && !x.ok).length}
     <td style="white-space:nowrap"><button class=g onclick="editC('${c.id}')">Sửa</button> <button onclick="run('${c.id}')">Gửi / Tiếp tục</button> <button class=g onclick="delC('${c.id}')">Xóa</button></tr>`; }).join("")}</table>
     <p><button class=g onclick="STOP=1">Dừng gửi</button></p><pre id=log>${esc(LOG.join("\n")) || "Chưa chạy."}</pre>`;
 }
-/* ---------- Khung gửi: gửi cho tôi / gửi cho người khác (đã chọn) ---------- */
-const sendPanel = () => {
-  const p = cur.stab == "pick", ed = E();
-  return `<div class=seg><button class="${p ? "" : "on"}" onclick="setStab('me')">Gửi cho tôi</button><button class="${p ? "on" : ""}" onclick="setStab('pick')">Gửi cho người khác (đã chọn)</button></div>` + (p
-    ? `<div class=m>Tích chọn người nhận rồi bấm gửi. Mỗi người nhận một thư riêng, người đã nhận thư này sẽ được bỏ qua.</div>
-    <div class=rr><select onchange="cur.pl=this.value;refPick()"><option value="">Tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.pl ? "selected" : ""}>${esc(l)}</option>`).join("")}</select><input placeholder="Tìm theo tên hoặc email" value="${esc(cur.q || "")}" oninput="cur.q=this.value;refPick()"></div>
-    <div id=pi>${pickInfo()}</div><div id=pbx class=pbox>${pickRows()}</div>
-    <pre id=log style="max-height:130px">${esc(LOG.join("\n")) || "Chưa gửi."}</pre>`
-    : `<p class=m>Gửi bản thử vào hộp thư của bạn (${esc(U.email)}) để xem thư trước khi gửi cho người khác.</p><button onclick=test()>Gửi thử cho tôi</button>`);
+/* ---------- Người nhận & gửi (soạn thư) ---------- */
+const HINT = {bcc: "Một thư gửi nhiều người, người nhận không thấy email của nhau.", cc: "Một thư gửi nhiều người, ai cũng thấy email của nhau.", one: "Mỗi người nhận một thư riêng, có thể gọi tên bằng {{ten}}."};
+const pickList = () => {
+  const e = E(), q = (cur.q || "").trim().toLowerCase(), m = new Map();
+  D.contacts.filter(c => !c.unsub && (!e.list || c.list == e.list) && (!q || (c.email + " " + (c.name || "")).toLowerCase().includes(q))).forEach(c => m.has(c.email) || m.set(c.email, c));
+  return [...m.values()];
 };
-const setStab = v => { cur.stab = v; $("#sp").innerHTML = sendPanel(); };
-const pickList = () => { const q = (cur.q || "").trim().toLowerCase(), m = new Map(); D.contacts.filter(c => !c.unsub && (!cur.pl || c.list == cur.pl) && (!q || (c.email + " " + (c.name || "")).toLowerCase().includes(q))).forEach(c => m.has(c.email) || m.set(c.email, c)); return [...m.values()]; };
-const pickInfo = () => { const e = E(), n = e.pick.length, sh = Math.min(150, pickList().length); return `<div class=m>Đã chọn <b>${n}</b> người · hiển thị ${sh}/${pickList().length} · <a href="#" onclick="pickAll();return false">Chọn tất cả đang hiển thị</a> · <a href="#" onclick="pickNone();return false">Bỏ chọn hết</a></div><p><button ${n ? "" : "disabled"} onclick="run('${e.id}',{pick:1})">Gửi ngay cho ${n} người đã chọn</button></p>`; };
-const pickRows = () => { const sel = new Set(E().pick); return pickList().slice(0, 150).map(c => `<label><input type=checkbox data-e="${esc(c.email)}" ${sel.has(c.email) ? "checked" : ""} onchange="pickTog(this)"> ${esc(c.name || "")} <span class=m>${esc(mk(c.email))}</span></label>`).join("") || `<div class=m style="padding:8px">Không có liên hệ phù hợp.</div>`; };
-const refPick = () => { $("#pi").innerHTML = pickInfo(); $("#pbx").innerHTML = pickRows(); };
-function pickTog(el) { const p = E().pick, e = el.dataset.e, i = p.indexOf(e); if (el.checked && i < 0) p.push(e); if (!el.checked && i >= 0) p.splice(i, 1); save(); $("#pi").innerHTML = pickInfo(); }
-function pickAll() { const p = new Set(E().pick); pickList().slice(0, 150).forEach(c => p.add(c.email)); E().pick = [...p]; save(); refPick(); }
-function pickNone() { E().pick = []; save(); refPick(); }
+const pickBox = () => `<div class=ph><label class=mc><input type=checkbox id=pm onchange="pickMaster(this)"><b id=pmt></b></label><input id=pq placeholder="🔍 Tìm tên hoặc email" value="${esc(cur.q || "")}" oninput="cur.q=this.value;refPick()"><span class=chip id=pc></span></div><div id=pbx class=pbox></div>`;
+function refHead() {
+  const e = E(), pm = $("#pm"); if (!pm) return;
+  const done = doneSet(e), sel = new Set(e.pick), ok = pickList().filter(c => !done.has(c.email)), n = ok.filter(c => sel.has(c.email)).length;
+  pm.checked = ok.length > 0 && n == ok.length; pm.indeterminate = n > 0 && n < ok.length;
+  $("#pmt").textContent = ` Chọn tất cả (${ok.length})`; $("#pc").textContent = `Đã chọn ${pend(e).length}`;
+}
+function refPick() {
+  const e = E(), rows = pickList(), done = doneSet(e), sel = new Set(e.pick);
+  $("#pbx").innerHTML = rows.slice(0, 200).map(c => { const d = done.has(c.email), on = sel.has(c.email);
+    return `<label class="pr ${on ? "on" : ""} ${d ? "dn" : ""}"><input type=checkbox data-e="${esc(c.email)}" ${on ? "checked" : ""} ${d ? "disabled" : ""} onchange="pickTog(this)"><span class=pn>${esc(c.name || "(chưa có tên)")}</span><span class=m>${esc(mk(c.email))}${d ? " · đã nhận" : ""}</span></label>`; }).join("")
+    + (rows.length > 200 ? `<div class=m style="padding:6px 8px">Còn ${rows.length - 200} người nữa, hãy dùng ô tìm kiếm để lọc.</div>` : "") || `<div class=m style="padding:8px">Không có liên hệ phù hợp.</div>`;
+  refHead(); refSend();
+}
+function pickTog(el) { const p = E().pick, x = el.dataset.e, i = p.indexOf(x); if (el.checked && i < 0) p.push(x); if (!el.checked && i >= 0) p.splice(i, 1); el.parentNode.classList.toggle("on", el.checked); save(); refHead(); refSend(); }
+function pickMaster(el) { const e = E(), done = doneSet(e), s = new Set(e.pick); pickList().filter(c => !done.has(c.email)).forEach(c => el.checked ? s.add(c.email) : s.delete(c.email)); e.pick = [...s]; save(); refPick(); }
+const refSend = () => { const b = $("#sp"); if (b) b.innerHTML = sendBox(); };
+function sendBox() {
+  const e = E(), n = pend(e).length, room = Math.max(0, D.set.cap - usedToday());
+  return `<div class=sum>${n ? `<b>${n}</b> người sẽ nhận → <b>${nMsg(e, n)}</b> thư` : (e.who == "pick" ? "Chưa chọn ai để gửi." : "Không còn ai để gửi.")}${n > room ? ` · <span style="color:#b00">hôm nay chỉ gửi được ${room} người, phần còn lại bấm Gửi tiếp vào hôm sau</span>` : ""}</div>
+    <div class=rr><button class=g onclick=test()>📧 Gửi thử cho tôi</button><button ${n && !RUN ? "" : "disabled"} onclick="run('${e.id}')">🚀 Gửi cho ${n} người</button>${RUN ? `<button class=g onclick="STOP=1">Dừng</button>` : ""}</div>${LOG.length ? `<pre id=log style="max-height:130px">${esc(LOG.join("\\n"))}</pre>` : ""}`;
+}
 function vEdit() {
   const ed = cur.edit;
   if (!ed) return `<h2>Soạn thư</h2><div class=card>Chưa chọn thư. <button onclick=newCamp()>+ Soạn thư mới</button> hoặc <a href="#" onclick="go('camps');return false">xem danh sách thư</a></div>`;
   const op = k => (cur.op?.[k] ?? k == "s") ? "open" : "";
   return `<h2>Soạn thư</h2><div class=row><div ondragover="event.preventDefault()" ondrop="drop(event)">
     <div class=card><input style="width:100%" placeholder="Tên thư (chỉ để bạn dễ nhớ)" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
-    <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
-    <div class=rcp><div class=m><b>Người nhận</b></div>
-    <div class=rr><select onchange="E().list=this.value;if(this.value=='@pick')cur.stab='pick';save();go()"><option value="">Gửi cho tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>Danh sách: ${esc(l)}</option>`).join("")}<option value="@pick" ${ed.list == "@pick" ? "selected" : ""}>Gửi cho từng người đã chọn (${ed.pick.length})</option></select>
-    <button class=g onclick="$('#qf').click()">📥 Nhập Excel/CSV</button><input type=file id=qf accept=".xlsx,.xls,.csv" hidden onchange="impQuick()"></div>
-    <div class=seg>${[["bcc", "BCC"], ["cc", "CC"], ["one", "Gửi riêng"]].map(([v, l]) => `<button class="${v == ed.mode ? "on" : ""}" onclick="E().mode='${v}';save();go()">${l}</button>`).join("")}</div>
-    <div class=m>${{bcc: "Gửi chung, người nhận không thấy email của nhau.", cc: "Gửi chung, người nhận thấy email của nhau.", one: "Mỗi người một thư riêng, có tên {{ten}}."}[ed.mode]}${ed.mode != "one" ? ` Mỗi thư tối đa <input type=number min=1 max=500 style="width:62px;padding:2px 5px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> người.` : ""}</div>
+    <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()"></div>
+    <div class=card><b>Người nhận</b> <span class=m>· danh sách lấy từ tab <a href="#" onclick="go('contacts');return false">Liên hệ</a></span>
+    <div class=fl>1. Danh sách</div>
+    <select style="width:100%" onchange="E().list=this.value;save();go()"><option value="">Tất cả liên hệ (${D.contacts.filter(c => !c.unsub).length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l && !c.unsub).length})</option>`).join("")}</select>
+    <div class=fl>2. Gửi tới</div>
+    <div class=seg>${[["all", "Cả danh sách"], ["pick", "Chọn từng người"]].map(([v, l]) => `<button class="${v == ed.who ? "on" : ""}" onclick="E().who='${v}';save();go()">${l}</button>`).join("")}</div>
+    ${ed.who == "pick" ? pickBox() : ""}
+    <div class=fl>3. Cách gửi</div>
+    <div class=seg>${[["bcc", "Thư chung · BCC"], ["cc", "Thư chung · CC"], ["one", "Từng người một thư"]].map(([v, l]) => `<button class="${v == ed.mode ? "on" : ""}" onclick="E().mode='${v}';save();go()">${l}</button>`).join("")}</div>
+    <div class=m>${HINT[ed.mode]}${ed.mode != "one" ? ` Tối đa <input type=number min=1 max=500 style="width:62px;padding:2px 5px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> người/thư.` : ""}</div>
     ${ed.cc || ed.bcc || cur.xc ? `<div class=rr><input placeholder="CC cố định (cách nhau dấu phẩy)" value="${esc(ed.cc)}" oninput="E().cc=this.value;save()"><input placeholder="BCC cố định (cách nhau dấu phẩy)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()"></div>` : `<a href="#" class=m onclick="cur.xc=1;go();return false">+ Thêm CC/BCC cố định</a>`}
-    ${plan(ed)}</div>
+    <div id=sp style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">${sendBox()}</div></div>
     <details ${op("t")} ontoggle="(cur.op ??= {}).t = this.open"><summary>Giao diện thư (màu, phông, cỡ chữ)</summary><div>${thm()}</div></details>
-    <div id=sp>${sendPanel()}</div></div>
     <div class=card>
     <div class=dz onclick="$('#fp').click()">Kéo ảnh hoặc tệp từ máy tính thả vào đây, hoặc bấm để chọn<br><span class=m>Ảnh thành khối ảnh trong thư. Tệp khác (PDF, Word...) thành tệp đính kèm.</span></div>
     <input type=file id=fp multiple hidden onchange="addFiles([...this.files]);this.value=''">${fl()}
@@ -554,14 +574,14 @@ const today = () => new Date().toLocaleDateString("sv");
 const usedToday = () => D.sent.filter(s => s.ok && s.at.startsWith(today())).length;
 let LOG = [];
 const say = t => { LOG.push(new Date().toLocaleTimeString("vi") + "  " + t); const l = $("#log"); if (l) { l.textContent = LOG.join("\n"); l.scrollTop = 1e9; } };
-async function run(id, opt) {
+async function run(id) {
   if (RUN) return alert("Đang có thư đang gửi.");
   const c = D.camps.find(x => x.id == id); if (!c.subject) return alert("Thư chưa có tiêu đề.");
   const badCc = [...tokens(c.cc), ...tokens(c.bcc)].filter(x => !isMail(x)); if (badCc.length) return alert("Email CC/BCC không hợp lệ: " + badCc.join(", "));
-  const all = pend(c), room = Math.max(0, D.set.cap - usedToday()), todo = all.slice(0, room), mode = opt?.pick ? "one" : c.mode, one = mode == "one", G = one ? 1 : gsz(c);
-  if (!todo.length) return alert(all.length ? "Hôm nay đã hết hạn mức gửi." : opt?.pick ? "Chưa chọn ai, hoặc những người đã chọn đều đã nhận thư này rồi." : "Không còn ai để gửi.");
+  const all = pend(c), room = Math.max(0, D.set.cap - usedToday()), todo = all.slice(0, room), mode = c.mode, one = mode == "one", G = one ? 1 : gsz(c);
+  if (!todo.length) return alert(all.length ? "Hôm nay đã hết hạn mức gửi." : c.who == "pick" ? "Chưa chọn ai, hoặc những người đã chọn đều đã nhận thư này rồi." : "Không còn ai để gửi.");
   const units = []; for (let k = 0; k < todo.length; k += G) units.push(todo.slice(k, k + G));
-  if (!confirm(`Gửi thư "${c.name}" cho ${todo.length} người${opt?.pick ? " đã chọn" : ""}, chia thành ${units.length} thư${one ? " (mỗi người một thư riêng)" : ` (${mode == "bcc" ? "BCC" : "CC"}, tối đa ${G} người/thư)`}?`)) return;
+  if (!confirm(`Gửi thư "${c.name}" cho ${todo.length} người${c.who == "pick" ? " đã chọn" : ""}, chia thành ${units.length} thư${one ? " (mỗi người một thư riêng)" : ` (${mode == "bcc" ? "BCC" : "CC"}, tối đa ${G} người/thư)`}?`)) return;
   const ccL = mails(c.cc), bccL = mails(c.bcc), per = one ? Math.max(1, D.set.batch) : 1;
   RUN = 1; STOP = 0; LOG = []; let fails = 0;
   say(`Còn ${all.length} người chưa gửi. Hôm nay còn được gửi ${room} người. Sẽ gửi ${units.length} thư.`);
@@ -575,7 +595,7 @@ async function run(id, opt) {
       try { await gsend(mime(to, s, h, A, cc, bcc)); fails = 0; } catch (e) { ok = 0; err = e.message; say(`Lỗi ${one ? em[0] : "thư " + (n + 1) + " (" + em.length + " người)"}: ${err}`); fails++; }
       const at = new Date().toLocaleString("sv"), batch = one ? Math.floor(n / per) + 1 : n + 1;
       u.forEach(x => D.sent.push({cid: id, email: x.email, name: x.name, at, batch, ok, ...(ok ? {} : {err}), ...(one ? {} : {grp: 1})}));
-      save(); if (tab == "camps") go();
+      save(); if (tab == "camps") go(); if (tab == "edit") refSend();
       if (ok) say(one ? `Đã gửi ${n + 1}/${units.length}.` : `Đã gửi thư ${n + 1}/${units.length} (${em.length} người).`);
       if (fails >= 5) { say("Lỗi liên tiếp 5 lần, dừng lại."); break; }
       if (n + 1 < units.length && !STOP) {
@@ -585,7 +605,7 @@ async function run(id, opt) {
     }
   } catch (e) { say("LỖI: " + e.message); }
   say(STOP ? "Đã dừng." : "Hoàn tất lượt gửi. Nếu còn người chưa gửi, bấm Gửi / Tiếp tục.");
-  RUN = 0; if (tab == "camps") go(); if (opt?.pick && $("#pi")) $("#pi").innerHTML = pickInfo();
+  RUN = 0; if (tab == "camps") go(); if (tab == "edit") refSend();
 }
 
 /* ---------- Lịch sử ---------- */
