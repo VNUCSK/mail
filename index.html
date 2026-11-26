@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: blob:; connect-src https://gmail.googleapis.com https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com; frame-src 'self' about: blob: https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: blob:; connect-src https://*.workers.dev https://gmail.googleapis.com https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com; frame-src 'self' about: blob: https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow,noarchive">
 <title>Mail CSK</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -34,6 +35,9 @@ details{border:1px solid #e6e6e2;border-radius:8px;margin:8px 0;background:#fcfc
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}.stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px #0001;color:#777}.stat b{display:block;font-size:28px;color:#241c15}
 .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;background:#e4e4e0}.tag.ok{background:#d9f2dd;color:#176b2b}.prev{position:sticky;top:12px;align-self:start}ol{padding-left:20px}
 @media(max-width:700px){aside{width:100%;padding:8px}main{padding:14px}}
+.rcp{margin:10px 0}.rr{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.rr>*{flex:1;min-width:140px}
+.seg{display:flex;border:1px solid #bbb;border-radius:6px;overflow:hidden;margin:6px 0}.seg button{flex:1;border-radius:0;background:#fff;font-weight:500}.seg button.on{background:#ffe01b;font-weight:700}
+.sum{background:#f1f7ff;border-radius:6px;padding:6px 10px;margin:6px 0;font-size:13px}
 /* Thanh định dạng chữ nằm ở cột trái */
 aside{width:250px;position:sticky;top:0;height:100vh;overflow-y:auto;align-self:flex-start}
 aside .me{margin-top:auto}
@@ -59,6 +63,8 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const getCid = () => CID_DEFAULT || localStorage.csk_cid || "";
+const CLOUD_DEFAULT = "";
+const getCloud = () => (CLOUD_DEFAULT || localStorage.csk_cloud || "").replace(/\/+$/, "");
 let U, D, TOK, EXP = 0, client, tab = "contacts", RUN = 0, STOP = 0, cur = {list: "", cid: "", edit: null}, IMG = {}, RT = null, RG = null;
 /* ---------- Mã hóa dữ liệu (AES-256-GCM, khóa sinh từ mật khẩu của bạn) ---------- */
 const DEF = () => ({contacts: [], camps: [], sent: [], set: {batch: 150, delay: 3, cap: 2000, gap: 5, mask: true, lock: 15}});
@@ -92,8 +98,21 @@ window.addEventListener("drop", e => e.preventDefault());
 
 /* ---------- Kho ảnh/tệp (IndexedDB) ---------- */
 const idb = new Promise(r => { const q = indexedDB.open("csk", 1); q.onupgradeneeded = () => q.result.createObjectStore("f"); q.onsuccess = () => r(q.result); });
-const fput = async (k, v) => { const d = await idb; return new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").put(v, k); t.oncomplete = r; }); };
-const fget = async k => { const d = await idb; return new Promise(r => { const q = d.transaction("f").objectStore("f").get(k); q.onsuccess = () => r(q.result); }); };
+let FK = null;
+async function initFK() {
+  if (!D.fk) D.fk = b2s(crypto.getRandomValues(new Uint8Array(32)));
+  FK = await crypto.subtle.importKey("raw", s2b(D.fk), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+const fput = async (k, v) => {
+  const d = await idb; let rec = v;
+  if (FK) { const iv = crypto.getRandomValues(new Uint8Array(12)); rec = {enc: 1, iv, ct: await crypto.subtle.encrypt({name: "AES-GCM", iv}, FK, await v.blob.arrayBuffer()), type: v.type, name: v.name}; }
+  return new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").put(rec, k); t.oncomplete = r; });
+};
+const fget = async k => {
+  const d = await idb, r = await new Promise(res => { const q = d.transaction("f").objectStore("f").get(k); q.onsuccess = () => res(q.result); });
+  if (r && r.enc) { try { return {blob: new Blob([await crypto.subtle.decrypt({name: "AES-GCM", iv: r.iv}, FK, r.ct)], {type: r.type}), type: r.type, name: r.name}; } catch (e) { return undefined; } }
+  return r;
+};
 async function loadImg(id) { const r = await fget(id); if (r) IMG[id] = {url: URL.createObjectURL(r.blob), name: r.name}; }
 const preload = async c => { for (const b of c.blocks) if (b.t == "img" && b.v && !IMG[b.v]) await loadImg(b.v); };
 
@@ -126,7 +145,7 @@ async function login() {
     pwView(localStorage[skey()] ? "unlock" : "new");
   } catch (e) { alert("Đăng nhập lỗi: " + e.message); }
 }
-async function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); clearTimeout(ST); await flush(); D = null; KEY = null; TOK = null; U = null; boot(); }
+async function logout() { if (RUN) return alert("Đang gửi, hãy dừng trước."); clearTimeout(ST); await flush(); D = null; KEY = null; FK = null; TOK = null; U = null; boot(); }
 function pwView(mode) {
   const nw = mode == "new", go_ = nw ? "pwNew()" : "pwUnlock()";
   $("#app").innerHTML = `<div class=login><div class=card><h2>${nw ? "Đặt mật khẩu bảo vệ dữ liệu" : "Mở khóa dữ liệu"}</h2><p class=m>${esc(U.email)}</p>
@@ -143,10 +162,10 @@ async function pwNew() {
   if (a != b) return alert("Hai mật khẩu không khớp.");
   SALT = crypto.getRandomValues(new Uint8Array(16)); KEY = await derive(a, SALT);
   let old = {}; try { old = JSON.parse(localStorage["csk:" + U.email] || "{}"); } catch (e) {}
-  setD(old); await flush(); delete localStorage["csk:" + U.email]; cur.edit = null; shell();
+  setD(old); await initFK(); await flush(); delete localStorage["csk:" + U.email]; cur.edit = null; shell();
 }
 async function pwUnlock() {
-  try { setD(await openBox(localStorage[skey()], $("#pw1").value)); } catch (e) { return alert("Sai mật khẩu."); }
+  try { setD(await openBox(localStorage[skey()], $("#pw1").value)); await initFK(); } catch (e) { return alert("Sai mật khẩu."); }
   cur.edit = null; shell();
 }
 function pwForgot() {
@@ -154,14 +173,14 @@ function pwForgot() {
   delete localStorage[skey()]; wipeFiles(); pwView("new");
 }
 async function lockNow() {
-  if (RUN || !D) return; clearTimeout(ST); await flush(); D = null; KEY = null; TOK = null; EXP = 0; cur.edit = null;
+  if (RUN || !D) return; clearTimeout(ST); await flush(); D = null; KEY = null; FK = null; TOK = null; EXP = 0; cur.edit = null;
   document.querySelectorAll("#tpm,#lkm,#pwm").forEach(x => x.remove()); pwView("unlock");
 }
 async function wipeFiles() { const d = await idb; await new Promise(r => { const t = d.transaction("f", "readwrite"); t.objectStore("f").clear(); t.oncomplete = r; }); IMG = {}; }
 async function wipeAll() {
   if (RUN) return alert("Đang gửi, hãy dừng trước.");
   if (prompt("Xóa toàn bộ liên hệ, thư, lịch sử và tệp trên máy này. Gõ XOA để xác nhận:") !== "XOA") return;
-  clearTimeout(ST); delete localStorage[skey()]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; KEY = null; TOK = null; U = null; boot();
+  clearTimeout(ST); delete localStorage[skey()]; delete localStorage["csk:" + U.email]; await wipeFiles(); D = null; KEY = null; FK = null; TOK = null; U = null; boot();
 }
 function chPw() {
   $("#pwm")?.remove(); const d = document.createElement("div"); d.id = "pwm"; d.style.cssText = "position:fixed;inset:0;background:#0006;z-index:50;display:flex;align-items:center;justify-content:center";
@@ -181,7 +200,7 @@ function shell() {
     <div id=tbx>${TB}</div>
     <div class=me>${esc(U.name)}<br>${esc(U.email)}<br><a href="#" onclick="logout();return false" style="padding:0;display:inline;color:#ffe01b">Đăng xuất</a> · <a href="#" onclick="lockNow();return false" style="padding:0;display:inline;color:#ffe01b">Khóa</a></div></aside><main id=v></main>`;
   document.querySelectorAll("aside a[data-t]").forEach(a => a.onclick = () => go(a.dataset.t));
-  go("contacts");
+  go("contacts"); cloudSync();
 }
 function go(t) {
   tab = t || tab; RT = null;
@@ -196,18 +215,93 @@ const lists = () => [...new Set(D.contacts.map(c => c.list))];
 const mk = e => D.set.mask === false ? e : String(e).replace(/^(.{1,2}).*(@.*)$/, "$1•••$2");
 function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
-  return `<h2>Liên hệ</h2><div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
+  return `<h2>Liên hệ</h2>${cloudBar()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
     <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
+    <div class=card><b>🔐 Chia sẻ danh sách với tài khoản khác</b> <span class=m>Xuất ra file mã hóa bằng mật khẩu chia sẻ, tài khoản kia bấm "Nhập file" và nhập đúng mật khẩu là có đủ danh sách. File này an toàn để gửi qua Zalo/email/Drive, người không có mật khẩu không đọc được.</span><br>
+    <button class=g onclick=shareExp()>⬆ Xuất file chia sẻ</button> <button class=g onclick="$('#sf').click()">⬇ Nhập file chia sẻ</button><input type=file id=sf accept=".csklist" hidden onchange="shareImp(this.files[0]);this.value=''"></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
     ${cur.list ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
     <p class=m>Hiển thị tối đa 300 dòng${D.set.mask === false ? "" : "; email được ẩn một phần (đổi trong Cài đặt)"}.</p><table><tr><th>Email<th>Tên<th>Danh sách<th>Trạng thái<th></tr>
     ${r.slice(0, 300).map(c => `<tr><td>${esc(mk(c.email))}<td>${esc(c.name)}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}
     <td><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button></tr>`).join("")}</table>`;
 }
-function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; save(); go(); }
+/* ---------- Kho chung Cloudflare ---------- */
+let CSTAT = "", CBUSY = 0, CT;
+const CST = t => { CSTAT = t; const e = $("#cst"); if (e) e.textContent = t; };
+const cloudBar = () => getCloud() ? `<div class=card style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class=g onclick="cloudSync(1)">☁️ Đồng bộ ngay</button><span class=m id=cst>${esc(CSTAT)}</span></div>` : "";
+const csync = () => { if (!getCloud()) return; clearTimeout(CT); CT = setTimeout(() => cloudSync(), 1500); };
+function setCloud(v) {
+  v = v.trim().replace(/\/+$/, "");
+  if (v && !/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.workers\.dev$/i.test(v)) return alert("Địa chỉ phải có dạng https://ten.tai-khoan.workers.dev");
+  localStorage.csk_cloud = v; CST(""); go();
+}
+const slim = () => D.contacts.map(({email, name, list, unsub, u}) => ({email, name: name || "", list, ...(unsub ? {unsub: true} : {}), u: u || 0}));
+const norm = a => JSON.stringify((a || []).map(({email, name, list, unsub, u}) => [list, email, name || "", unsub ? 1 : 0, u || 0]).sort((x, y) => (x[0] + "|" + x[1]).localeCompare(y[0] + "|" + y[1])));
+function mergeIn(R) {
+  const m = new Map();
+  for (const c of [...D.contacts, ...(R.contacts || [])]) {
+    const k = c.list + "|" + c.email, o = m.get(k);
+    if (!o || (c.u || 0) > (o.u || 0)) m.set(k, {...c, id: o?.id || c.id || uid()});
+  }
+  const del = {...(D.del || {})}; for (const [l, t] of Object.entries(R.del || {})) del[l] = Math.max(del[l] || 0, t);
+  D.del = del; D.contacts = [...m.values()].filter(c => !(del[c.list] && (c.u || 0) <= del[c.list]));
+}
+async function cfetch(method, body) {
+  const t = await getTok();
+  const r = await fetch(getCloud() + "/contacts", {method, headers: {Authorization: "Bearer " + t, ...(body ? {"Content-Type": "application/json"} : {})}, body: body ? JSON.stringify(body) : undefined});
+  if (r.status == 409) return {conflict: true, data: await r.json()};
+  if (r.status == 403) throw new Error("tài khoản này chưa được cấp quyền truy cập Kho chung.");
+  if (!r.ok) throw new Error("lỗi máy chủ (" + r.status + ")");
+  return {data: await r.json()};
+}
+async function cloudSync(manual) {
+  if (!getCloud() || !D || CBUSY) return; CBUSY = 1; CST("Đang đồng bộ...");
+  try {
+    let r = await cfetch("GET"), R = r.data; const n0 = D.contacts.length;
+    mergeIn(R); D.rev = R.rev || 0;
+    for (let i = 0; i < 3; i++) {
+      if (norm(D.contacts) == norm(R.contacts) && JSON.stringify(D.del || {}) == JSON.stringify(R.del || {})) break;
+      r = await cfetch("PUT", {contacts: slim(), del: D.del || {}, rev: D.rev});
+      if (!r.conflict) { D.rev = r.data.rev; break; }
+      R = r.data; mergeIn(R); D.rev = R.rev || 0;
+    }
+    save(); CST(`Đã đồng bộ ${D.contacts.length} liên hệ lúc ${new Date().toLocaleTimeString("vi")}.`);
+    if (tab == "contacts" && (manual || D.contacts.length != n0)) go();
+  } catch (e) { CST("Chưa đồng bộ được: " + (e.message || e)); }
+  CBUSY = 0;
+}
+async function shareExp() {
+  if (!D.contacts.length) return alert("Chưa có liên hệ nào để xuất.");
+  const pw = prompt("Đặt mật khẩu chia sẻ (tối thiểu 8 ký tự).\nHãy gửi mật khẩu này cho người nhận bằng kênh khác, không gửi cùng file:");
+  if (!pw) return; if (pw.length < 8) return alert("Mật khẩu tối thiểu 8 ký tự.");
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), k = await derive(pw, salt);
+  const data = {v: 1, contacts: D.contacts.map(({email, name, list, unsub}) => ({email, name, list, unsub}))};
+  const ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, k, new TextEncoder().encode(JSON.stringify(data)));
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({csk: 1, s: b2s(salt), i: b2s(iv), c: b2s(ct)})], {type: "application/octet-stream"}));
+  a.download = "danh-sach-email.csklist"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  alert(`Đã xuất ${data.contacts.length} liên hệ. Gửi file cho người nhận và báo mật khẩu qua kênh khác.`);
+}
+async function shareImp(f) {
+  if (!f) return;
+  let data;
+  try {
+    const o = JSON.parse(await f.text()); if (!o.csk) throw 0;
+    const pw = prompt("Nhập mật khẩu chia sẻ của file này:"); if (!pw) return;
+    data = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: s2b(o.i)}, await derive(pw, s2b(o.s)), s2b(o.c))));
+  } catch (e) { return alert("Không mở được file: sai mật khẩu hoặc file không đúng định dạng."); }
+  const have = new Set(D.contacts.map(c => c.list + "|" + c.email)); let add = 0, dup = 0;
+  for (const c of data.contacts || []) {
+    if (!isMail(String(c.email || ""))) continue;
+    const key = c.list + "|" + c.email;
+    if (have.has(key)) { dup++; continue; }
+    have.add(key); D.contacts.push({id: uid(), email: c.email, name: c.name || "", list: c.list || "Chung", u: Date.now(), ...(c.unsub ? {unsub: true} : {})}); add++;
+  }
+  save(); csync(); alert(`Đã thêm ${add} liên hệ, bỏ qua ${dup} liên hệ trùng.`); go();
+}
+function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; c.u = Date.now(); save(); csync(); go(); }
 function delList() {
   if (!cur.list || !confirm(`Xóa toàn bộ danh sách "${cur.list}" (${D.contacts.filter(c => c.list == cur.list).length} email)?`)) return;
-  D.contacts = D.contacts.filter(c => c.list != cur.list); cur.list = ""; save(); go();
+  (D.del ||= {})[cur.list] = Date.now(); D.contacts = D.contacts.filter(c => c.list != cur.list); cur.list = ""; save(); csync(); go();
 }
 async function importFile(f, list) {
   const wb = f.name.toLowerCase().endsWith(".csv") ? XLSX.read(await f.text(), {type: "string"}) : XLSX.read(await f.arrayBuffer());
@@ -219,19 +313,19 @@ async function importFile(f, list) {
     if (j < 0) { if (cells.some(x => x.includes("@"))) bad++; continue; }
     const e = cells[j].toLowerCase(), name = cells.slice(j + 1).find(okName) || cells.slice(0, j).find(okName) || "";
     if (have.has(e)) { dup++; continue; }
-    have.add(e); D.contacts.push({id: uid(), email: e, name, list}); add++;
+    have.add(e); D.contacts.push({id: uid(), email: e, name, list, u: Date.now()}); add++;
   }
   return {add, dup, bad};
 }
 async function imp() {
   const f = $("#fi").files[0], list = $("#ln").value.trim() || "Chung";
   if (!f) return alert("Chọn file trước.");
-  const r = await importFile(f, list); save(); cur.list = list; alert(`Đã thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
+  const r = await importFile(f, list); save(); csync(); cur.list = list; alert(`Đã thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
 }
 async function impQuick() {
   const f = $("#qf").files[0]; if (!f) return alert("Chọn file Excel/CSV trước.");
   const list = f.name.replace(/\.[^.]+$/, "").slice(0, 40) || "Danh sách";
-  const r = await importFile(f, list); E().list = list; save(); alert(`Danh sách "${list}": thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
+  const r = await importFile(f, list); E().list = list; save(); csync(); alert(`Danh sách "${list}": thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
 }
 
 /* ---------- Trình soạn thư ---------- */
@@ -428,10 +522,8 @@ const pend = c => {
 const gsz = c => Math.min(500, Math.max(1, +c.grp || 150));
 const nMsg = (c, n) => c.mode == "one" ? n : Math.ceil(n / gsz(c));
 function plan(c) {
-  const n = pend(c).length, one = c.mode == "one", G = gsz(c), full = Math.floor(n / G), rest = n % G, room = Math.max(0, D.set.cap - usedToday());
-  const split = one ? "" : n ? `<br>Cách chia: ${[full ? `${full} thư × ${G} người` : "", rest ? `1 thư × ${rest} người` : ""].filter(Boolean).join(" + ")}.` : "";
-  return `<div class=card style="background:#f1f7ff;margin:8px 0"><b>${n}</b> người chưa nhận → sẽ gửi <b>${nMsg(c, n)}</b> thư${one ? " (mỗi người một thư)" : ` (${c.mode == "bcc" ? "BCC" : "CC"}, mỗi thư tối đa ${G} người)`}.${split}
-    ${n > room ? `<br><span style="color:#b00">Hôm nay chỉ còn gửi được ${room} người (giới hạn ngày trong Cài đặt); phần còn lại bấm Gửi / Tiếp tục vào hôm sau.</span>` : ""}</div>`;
+  const n = pend(c).length, room = Math.max(0, D.set.cap - usedToday());
+  return `<div class=sum><b>${n}</b> người chưa nhận → <b>${nMsg(c, n)}</b> thư${n > room ? ` · <span style="color:#b00">hôm nay chỉ gửi được ${room} người (bấm Gửi tiếp vào hôm sau)</span>` : ""}</div>`;
 }
 function vCamps() {
   const kind = c => ({one: "Riêng từng người", bcc: `BCC · ${gsz(c)} người/thư`, cc: `CC · ${gsz(c)} người/thư`}[c.mode]);
@@ -449,13 +541,13 @@ function vEdit() {
   return `<h2>Soạn thư</h2><div class=row><div ondragover="event.preventDefault()" ondrop="drop(event)">
     <div class=card><input style="width:100%" placeholder="Tên thư (chỉ để bạn dễ nhớ)" value="${esc(ed.name)}" oninput="E().name=this.value;save()">
     <input style="width:100%" placeholder="Tiêu đề thư (người nhận sẽ thấy dòng này)" value="${esc(ed.subject)}" oninput="E().subject=this.value;save()">
-    <details ${op("s")} ontoggle="(cur.op ??= {}).s = this.open"><summary>Người nhận &amp; kiểu gửi (CC, BCC)</summary><div>
-    <div class=m><b>Tải thẳng file Excel/CSV người nhận</b> (cột email, tên nếu có):</div><input type=file id=qf accept=".xlsx,.xls,.csv"> <button class=g onclick=impQuick()>Nhập &amp; chọn làm người nhận</button>
-    <select style="width:100%" onchange="E().list=this.value;save();go()"><option value="">Gửi tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
-    <select style="width:100%" onchange="E().mode=this.value;save();go()">${[["bcc", "Gửi chung BCC: tự chia nhóm, người nhận không thấy nhau"], ["one", "Gửi riêng: mỗi người một thư (có {{ten}})"], ["cc", "Gửi chung CC: người nhận thấy nhau"]].map(([v, l]) => `<option value=${v} ${v == ed.mode ? "selected" : ""}>${l}</option>`).join("")}</select>
-    ${ed.mode != "one" ? `<div class=m>Số người mỗi thư <input type=number min=1 max=500 style="width:70px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> (mặc định 150, Gmail cho tối đa 500). Ví dụ 1000 email sẽ tự chia thành 7 thư. Thư chung không cá nhân hóa {{ten}}.</div>` : ""}
-    <input style="width:100%" placeholder="CC cố định, nhiều email cách nhau bằng dấu phẩy (tùy chọn)" value="${esc(ed.cc)}" oninput="E().cc=this.value;save()">
-    <input style="width:100%" placeholder="BCC cố định, nhiều email cách nhau bằng dấu phẩy (tùy chọn)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()"></div></details>${plan(ed)}
+    <div class=rcp><div class=m><b>Người nhận</b></div>
+    <div class=rr><select onchange="E().list=this.value;save();go()"><option value="">Tất cả danh sách</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+    <button class=g onclick="$('#qf').click()">📥 Nhập Excel/CSV</button><input type=file id=qf accept=".xlsx,.xls,.csv" hidden onchange="impQuick()"></div>
+    <div class=seg>${[["bcc", "BCC"], ["cc", "CC"], ["one", "Gửi riêng"]].map(([v, l]) => `<button class="${v == ed.mode ? "on" : ""}" onclick="E().mode='${v}';save();go()">${l}</button>`).join("")}</div>
+    <div class=m>${{bcc: "Gửi chung, người nhận không thấy email của nhau.", cc: "Gửi chung, người nhận thấy email của nhau.", one: "Mỗi người một thư riêng, có tên {{ten}}."}[ed.mode]}${ed.mode != "one" ? ` Mỗi thư tối đa <input type=number min=1 max=500 style="width:62px;padding:2px 5px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> người.` : ""}</div>
+    ${ed.cc || ed.bcc || cur.xc ? `<div class=rr><input placeholder="CC cố định (cách nhau dấu phẩy)" value="${esc(ed.cc)}" oninput="E().cc=this.value;save()"><input placeholder="BCC cố định (cách nhau dấu phẩy)" value="${esc(ed.bcc)}" oninput="E().bcc=this.value;save()"></div>` : `<a href="#" class=m onclick="cur.xc=1;go();return false">+ Thêm CC/BCC cố định</a>`}
+    ${plan(ed)}</div>
     <details ${op("t")} ontoggle="(cur.op ??= {}).t = this.open"><summary>Giao diện thư (màu, phông, cỡ chữ)</summary><div>${thm()}</div></details>
     <button class=g onclick=tpl()>🎨 Mẫu thiết kế</button> <button class=g onclick=test()>Gửi thử cho tôi</button></div>
     <div class=card>
@@ -472,10 +564,16 @@ function vSet() {
     Gửi riêng: mỗi lô <input type=number value=${s.batch} style="width:70px" onchange="D.set.batch=Math.max(1,+this.value||150);save()"> mail, nghỉ <input type=number value=${s.delay} style="width:55px" onchange="D.set.delay=+this.value;save()"> phút.<br>
     Tối đa mỗi ngày <input type=number value=${s.cap} style="width:75px" onchange="D.set.cap=+this.value;save()"> người nhận.
     <div class=m>Hôm nay đã gửi: <b>${usedToday()}</b> người. Gmail giới hạn số người nhận mỗi thư và mỗi ngày tùy loại tài khoản, hãy đặt mức phù hợp với tài khoản của bạn.</div></div>
+    <div class=card><b>☁️ Kho chung (Cloudflare)</b>
+    <div class=m>Danh sách liên hệ được lưu trên Cloudflare của bạn và dùng chung cho các tài khoản được cấp quyền, nên tài khoản nào đăng nhập cũng thấy. Dữ liệu trên Cloudflare <b>không mã hóa</b>; chỉ tài khoản Google nằm trong danh sách cho phép (cài trong Worker) mới đọc/ghi được.</div>
+    <input style="width:100%" placeholder="Địa chỉ Worker, ví dụ https://csk-mail.ten-ban.workers.dev" value="${esc(getCloud())}" ${CLOUD_DEFAULT ? "disabled" : ""} onchange="setCloud(this.value)">
+    <button class=g onclick="cloudSync(1)">Kiểm tra &amp; đồng bộ</button> <span class=m id=cst>${esc(CSTAT)}</span></div>
     <div class=card><b>🔒 Bảo mật dữ liệu</b>
-    <ul class=m><li>Liên hệ, thư và lịch sử được <b>mã hóa AES-256</b> bằng mật khẩu của bạn trước khi lưu trong trình duyệt. Không có máy chủ nào của trang này nhận dữ liệu.</li>
+    <ul class=m><li>Liên hệ, thư và lịch sử được <b>mã hóa AES-256</b> bằng mật khẩu của bạn trước khi lưu trong trình duyệt. Nếu không bật Kho chung, không có máy chủ nào nhận dữ liệu của bạn.</li>
+    <li>Khi bật Kho chung, danh sách liên hệ (không phải thư, ảnh hay lịch sử) được lưu <b>không mã hóa</b> trong Cloudflare của bạn và chỉ các tài khoản trong danh sách cho phép mới đọc được.</li>
     <li>Ứng dụng chỉ xin quyền <b>gửi thư</b> của Gmail, không đọc được hộp thư của bạn.</li>
-    <li>Ảnh và tệp đính kèm lưu trong trình duyệt ở dạng chưa mã hóa. Hãy xóa dữ liệu khi dùng máy chung.</li>
+    <li>Ảnh và tệp đính kèm thêm từ nay cũng được mã hóa. Hãy xóa dữ liệu khi dùng máy chung.</li>
+    <li><b>Trang này chạy hoàn toàn trên trình duyệt</b>: danh sách email chỉ nằm trong máy của bạn, không bao giờ được đưa lên GitHub. Chỉ đưa file <code>index.html</code> lên GitHub, tuyệt đối <b>không</b> commit file Excel/CSV chứa email vào kho.</li>
     <li>Quên mật khẩu thì không khôi phục được dữ liệu (chỉ xóa để bắt đầu lại).</li></ul>
     <label><input type=checkbox ${s.mask !== false ? "checked" : ""} onchange="D.set.mask=this.checked;save()"> Ẩn một phần email khi hiển thị trên màn hình (ab•••@gmail.com)</label><br>
     Tự khóa sau <input type=number min=0 value=${s.lock} style="width:60px" onchange="D.set.lock=Math.max(0,+this.value||0);save()"> phút không thao tác (0 = tắt; không khóa khi đang gửi).<br><br>
