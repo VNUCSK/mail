@@ -399,7 +399,7 @@ const blk = () => E().blocks.map((b, i) => `<div class=blk ondragover="event.pre
   ${b.t == "r" ? `Nền <input type=color value="${b.bg || "#ffffff"}" onchange="E().blocks[${i}].bg=this.value;go()"><button class=g onclick="E().blocks[${i}].bg='';save();go()">∅</button> ` : ""}
   <button class=g onclick=mv(${i},-1)>↑</button> <button class=g onclick=mv(${i},1)>↓</button> <button class=g onclick=rm(${i})>✕</button></span></div>
   ${b.t == "r" ? `<div class=rt contenteditable data-i=${i} style="background:${b.bg || "#fff"};font-family:${E().theme.font};font-size:${E().theme.size}px;color:${E().theme.color}" oninput="E().blocks[${i}].v=this.innerHTML;upd()" onpaste="pst(event,${i + 1})">${b.v}</div>`
-  : b.t == "img" ? `${IMG[b.v] ? `<img src="${IMG[b.v].url}" style="max-width:100%;max-height:150px;display:block">` : "(không đọc được ảnh)"}<input style="width:100%" placeholder="Link khi bấm vào ảnh (tùy chọn)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">`
+  : b.t == "img" ? `${IMG[b.v] ? `<img src="${IMG[b.v].url}" style="max-width:100%;max-height:150px;display:block">` : "(không đọc được ảnh)"}<div class=m>🖼 ${esc(IMG[b.v]?.name || "")}</div><input style="width:100%" placeholder="Link khi bấm vào ảnh (tùy chọn)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">`
   : b.t == "btn" ? `<input style="width:100%" placeholder="Chữ trên nút" value="${esc(b.v)}" oninput="E().blocks[${i}].v=this.value;upd()"><input style="width:100%" placeholder="Link (https://...)" value="${esc(b.u)}" oninput="E().blocks[${i}].u=this.value;upd()">
     Nền nút <input type=color value="${b.bg || "#ffe01b"}" onchange="E().blocks[${i}].bg=this.value;upd()"> Chữ <input type=color value="${b.fg || "#241c15"}" onchange="E().blocks[${i}].fg=this.value;upd()">` : ""}</div>`).join("");
 const thm = () => {
@@ -427,7 +427,7 @@ async function shrink(f) {
   const bm = await createImageBitmap(f), k = Math.min(1, 1400 / bm.width), cv = document.createElement("canvas");
   cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
   const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(bm, 0, 0, cv.width, cv.height);
-  return {blob: await new Promise(r => cv.toBlob(r, "image/jpeg", .85)), type: "image/jpeg", name: f.name};
+  return {blob: await new Promise(r => cv.toBlob(r, "image/jpeg", .85)), type: "image/jpeg", name: f.name.replace(/\.[^.]+$/, "") + ".jpg"};
 }
 async function addFiles(fs, at) {
   at ??= E().blocks.length; document.body.style.cursor = "wait";
@@ -503,11 +503,12 @@ function vSet() {
 const u8 = s => { const a = new TextEncoder().encode(s); let b = ""; for (let i = 0; i < a.length; i++) b += String.fromCharCode(a[i]); return btoa(b); };
 const b64url = s => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const hdr = s => "=?UTF-8?B?" + u8(s) + "?=";
+const fn = n => { n = String(n || "").replace(/[\r\n"\\]/g, "_"); return /^[\x20-\x7e]*$/.test(n) ? n : hdr(n); };
 const wrap = s => s.replace(/(.{76})/g, "$1\r\n");
 const b64blob = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(",")[1]); fr.readAsDataURL(b); });
 async function assets(c) {
   const imgs = [], files = [];
-  for (const id of new Set(c.blocks.filter(b => b.t == "img" && b.v).map(b => b.v))) { const r = await fget(id); if (r) imgs.push({id, type: r.type, b64: wrap(await b64blob(r.blob))}); }
+  for (const id of new Set(c.blocks.filter(b => b.t == "img" && b.v).map(b => b.v))) { const r = await fget(id); if (r) imgs.push({id, name: r.name || id, type: r.type, b64: wrap(await b64blob(r.blob))}); }
   for (const f of c.files) { const r = await fget(f.id); if (r) files.push({name: f.name, type: f.type || "application/octet-stream", b64: wrap(await b64blob(r.blob))}); }
   return {imgs, files};
 }
@@ -516,9 +517,9 @@ function mime(to, subj, body, A, cc = [], bcc = []) {
   const H = [`From: ${hdr(U.name)} <${U.email}>`, `To: ${to}`, ...(cc.length ? [`Cc: ${cc.join(",\r\n ")}`] : []), ...(bcc.length ? [`Bcc: ${bcc.join(",\r\n ")}`] : []), `Subject: ${hdr(subj)}`, "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${b2}"`, "", `--${b2}`, `Content-Type: multipart/related; boundary="${b1}"`, "",
     `--${b1}`, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", wrap(u8(body))];
-  for (const m of A.imgs) H.push(`--${b1}`, `Content-Type: ${m.type}; name="${m.id}"`, "Content-Transfer-Encoding: base64", `Content-ID: <${m.id}@csk>`, `Content-Disposition: inline; filename="${m.id}"`, "", m.b64);
+  for (const m of A.imgs) H.push(`--${b1}`, `Content-Type: ${m.type}; name="${fn(m.name)}"`, "Content-Transfer-Encoding: base64", `Content-ID: <${m.id}@csk>`, `Content-Disposition: inline; filename="${fn(m.name)}"`, "", m.b64);
   H.push(`--${b1}--`);
-  for (const f of A.files) H.push(`--${b2}`, `Content-Type: ${f.type}; name="${hdr(f.name)}"`, "Content-Transfer-Encoding: base64", `Content-Disposition: attachment; filename="${hdr(f.name)}"`, "", f.b64);
+  for (const f of A.files) H.push(`--${b2}`, `Content-Type: ${f.type}; name="${fn(f.name)}"`, "Content-Transfer-Encoding: base64", `Content-Disposition: attachment; filename="${fn(f.name)}"`, "", f.b64);
   H.push(`--${b2}--`, "");
   return H.join("\r\n");
 }
