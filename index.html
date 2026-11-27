@@ -225,10 +225,11 @@ const lists = () => [...new Set(D.contacts.map(c => c.list))];
 const mk = e => D.set.hide !== true ? e : String(e).replace(/^(.{1,2}).*(@.*)$/, "$1•••$2");
 function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
-  return `<h2>Liên hệ</h2>${contactNote()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). Nếu dòng đầu có tiêu đề cột như Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị công tác, Địa chỉ thì web tự nhận các cột đó. File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
-    <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
+  return `<h2>Liên hệ</h2>${contactNote()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). Nếu dòng đầu có tiêu đề cột như Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị công tác, Địa chỉ thì web tự nhận các cột đó. Chưa có file? Tải file Excel mẫu hoặc thêm từng người thủ công. File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
+    <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button>
+    <div style="margin-top:8px"><button class=g onclick=tplXlsx()>⬇ Tải file Excel mẫu</button> <button class=g onclick=addContact()>+ Thêm liên hệ thủ công</button></div></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
-    ${cur.list && (!ME || ME.role == "admin") ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
+    <button class=g onclick=expContacts()>⬆ Xuất Excel (${r.length})</button> ${cur.list && (!ME || ME.role == "admin") ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
     <p class=m>Hiển thị tối đa 300 dòng${D.set.hide === true ? "; email, SĐT được ẩn một phần (đổi trong Cài đặt)" : ""}.</p><div style="overflow-x:auto"><table class=ct><tr><th>Email<th>Tên<th>Giới tính<th>Chức vụ<th>Đơn vị công tác<th>SĐT<th>Địa chỉ<th>Danh sách<th>Trạng thái<th class=ac></tr>
     ${r.slice(0, 300).map(c => `<tr><td class=nw>${esc(mk(c.email))}<td class=nw>${esc(c.name)}<td class=nw>${esc(c.gender || "")}<td class=wr>${esc(c.title || "")}<td class=wr>${esc(c.org || "")}<td class=nw>${esc(mkp(c.phone))}<td class=wr style="min-width:240px">${esc(c.addr || "")}<td class=nw>${esc(c.list)}<td class=nw>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}${PEND.keys.has(c.list + "|" + c.email) ? ` <span class="tag wait">Chờ duyệt</span>` : ""}
     <td class=ac><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button> <button class=g onclick="editContact('${c.id}')">Sửa</button> ${canDel(c) ? `<button class=g onclick="delContact('${c.id}')">${ME && ME.role != "admin" ? "Bỏ" : "Xóa"}</button>` : ""}</tr>`).join("")}</table></div>`;
@@ -288,14 +289,14 @@ async function delList() {
   if (!cur.list || !(await ask(`Xóa toàn bộ danh sách "${cur.list}" (${D.contacts.filter(c => c.list == cur.list).length} email)?`, "Xóa danh sách", 1))) return;
   (D.del ||= {})[cur.list] = Date.now(); D.contacts = D.contacts.filter(c => c.list != cur.list); cur.list = ""; save(); csync(); go();
 }
-const HDR = [["email", /^(e-?mail|thu dien tu|gmail|dia chi e-?mail)$/], ["name", /^(ho va ten|ho ten|ten|name|full ?name|ten nguoi nhan)$/], ["gender", /gioi ?tinh|^gender$|^sex$/], ["title", /chuc ?vu|chuc ?danh|^position$|^title$/], ["phone", /^(sdt|so dien thoai|dien thoai|phone|mobile|tel|so dt)/], ["org", /don ?vi|co ?quan|to ?chuc|cong ?ty|^organi[sz]ation$|^company$/], ["addr", /^dia ?chi$|^address$/]];
+const HDR = [["email", /^(e-?mail|thu dien tu|gmail|dia chi e-?mail)$/], ["name", /^(ho va ten|ho ten|ten|name|full ?name|ten nguoi nhan)$/], ["gender", /gioi ?tinh|^gender$|^sex$/], ["title", /chuc ?vu|chuc ?danh|^position$|^title$/], ["phone", /^(sdt|so dien thoai|dien thoai|phone|mobile|tel|so dt)/], ["org", /don ?vi|co ?quan|to ?chuc|cong ?ty|^organi[sz]ation$|^company$/], ["addr", /^dia ?chi$|^address$/], ["list", /^(danh ?sach|list|nhom)/], ["status", /^trang ?thai/]];
 const hnorm = x => String(x ?? "").toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 const gnorm = x => { const v = hnorm(x); return /^(nam|male|m|ong|anh)$/.test(v) ? "Nam" : /^(nu|female|f|ba|chi)$/.test(v) ? "Nữ" : String(x || "").trim().slice(0, 20); };
 async function importFile(f, list) {
   const wb = f.name.toLowerCase().endsWith(".csv") ? XLSX.read(await f.text(), {type: "string"}) : XLSX.read(await f.arrayBuffer());
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: false});
-  const have = new Map(D.contacts.filter(c => c.list == list).map(c => [c.email, c])), okName = x => x && !x.includes("@") && !/^\d+$/.test(x);
-  /* Nếu dòng tiêu đề có tên cột (Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị, Địa chỉ) thì nhận cột theo tiêu đề */
+  const kk = (l, e) => l + "|" + e, have = new Map(D.contacts.map(c => [kk(c.list, c.email), c])), okName = x => x && !x.includes("@") && !/^\d+$/.test(x);
+  /* Nếu dòng tiêu đề có tên cột (Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị, Địa chỉ, Danh sách, Trạng thái) thì nhận cột theo tiêu đề */
   let hi = -1, cmap = null;
   for (let i = 0; i < Math.min(rows.length, 10) && !cmap; i++) {
     const m = {}; (rows[i] || []).forEach((x, j) => { const h = hnorm(x), k = HDR.find(([, re]) => re.test(h)); if (k && m[k[0]] == null) m[k[0]] = j; });
@@ -303,11 +304,13 @@ async function importFile(f, list) {
   }
   let add = 0, dup = 0, bad = 0, upd = 0;
   for (const r of rows.slice(hi + 1)) {
-    const cells = (r || []).map(x => String(x ?? "").trim()); let e, name, ex = {};
+    const cells = (r || []).map(x => String(x ?? "").trim()); let e, name, ex = {}, L = list, unsub = false;
     if (cmap) {
       const v = cells[cmap.email] || "";
       if (!isMail(v.toLowerCase())) { if (cells.some(x => x.includes("@"))) bad++; continue; }
       e = v.toLowerCase(); name = (cells[cmap.name] || "").slice(0, 120);
+      if (cmap.list != null && cells[cmap.list]) L = cells[cmap.list].slice(0, 80);
+      if (cmap.status != null && /huy|unsub/.test(hnorm(cells[cmap.status]))) unsub = true;
       for (const k of CF) if (cmap[k] != null && cells[cmap[k]]) {
         let v2 = cells[cmap[k]]; if (k == "gender") v2 = gnorm(v2); else if (k == "phone" && /^[1-9]\d{8}$/.test(v2)) v2 = "0" + v2;
         ex[k] = v2.slice(0, CFMAX[k]);
@@ -317,9 +320,10 @@ async function importFile(f, list) {
       if (j < 0) { if (cells.some(x => x.includes("@"))) bad++; continue; }
       e = cells[j].toLowerCase(); name = cells.slice(j + 1).find(okName) || cells.slice(0, j).find(okName) || "";
     }
-    const o = have.get(e);
+    if (/@example\.(com|org|net)$/.test(e)) continue;   /* email ví dụ trong file mẫu: bỏ qua */
+    const o = have.get(kk(L, e));
     if (o) { let ch = 0; if (!o.name && name) { o.name = name; ch = 1; } for (const k of CF) if (!o[k] && ex[k]) { o[k] = ex[k]; ch = 1; } if (ch) { o.u = Date.now(); upd++; } else dup++; continue; }
-    const c = {id: uid(), email: e, name, list, ...ex, u: Date.now()}; D.contacts.push(c); have.set(e, c); add++;
+    const c = {id: uid(), email: e, name, list: L, ...(unsub ? {unsub: true} : {}), ...ex, u: Date.now()}; D.contacts.push(c); have.set(kk(L, e), c); add++;
   }
   return {add, dup, bad, upd};
 }
@@ -1007,6 +1011,53 @@ async function propDo(i, act, msg) {
 }
 const propOk = i => propDo(i, "approve", "Đã duyệt và đưa dữ liệu của " + (PROPS[i]?.name || "") + " lên Kho chung.");
 async function propNo(i) { const x = PROPS[i]; if (!x || !(await ask(`Từ chối dữ liệu của ${x.name} (${x.email})? Dữ liệu sẽ không được đưa lên Kho chung.`, "Từ chối", 1))) return; const j = PROPS.findIndex(p => p.email == x.email); if (j < 0) return; propDo(j, "reject", "Đã từ chối dữ liệu của " + x.name + "."); }
+
+/* ---------- Liên hệ: file Excel mẫu, thêm thủ công, xuất Excel ---------- */
+const xlsxOk = () => typeof XLSX != "undefined" || (toast("Chưa tải được thư viện Excel, hãy kiểm tra mạng rồi tải lại trang.", "err"), false);
+function tplXlsx() {
+  if (!xlsxOk()) return;
+  const head = ["Email", "Họ và tên", "Giới tính", "Chức vụ", "SĐT", "Đơn vị công tác", "Địa chỉ", "Danh sách (tùy chọn)"];
+  const ws = XLSX.utils.aoa_to_sheet([head,
+    ["nguyenvana@example.com", "Nguyễn Văn A", "Nam", "Giám đốc", "0901234567", "Công ty ABC", "144 Xuân Thủy, Cầu Giấy, Hà Nội", ""],
+    ["tranthib@example.com", "Trần Thị B", "Nữ", "Trưởng phòng", "0987654321", "Trường Đại học XYZ", "1 Đại Cồ Việt, Hai Bà Trưng, Hà Nội", ""]]);
+  ws["!cols"] = [30, 22, 11, 20, 14, 28, 40, 20].map(wch => ({wch}));
+  const gd = XLSX.utils.aoa_to_sheet([["Hướng dẫn điền file liên hệ"], [""],
+    ["1. Điền mỗi người một dòng ở sheet \"Danh sách liên hệ\". Chỉ cột Email là bắt buộc, các cột còn lại có thể để trống."],
+    ["2. Giữ nguyên dòng tiêu đề (dòng đầu tiên). Hai dòng ví dụ dùng email @example.com sẽ tự bị bỏ qua khi nhập, bạn có thể xóa hoặc ghi đè."],
+    ["3. Giới tính: Nam, Nữ hoặc Khác. SĐT nên để dạng văn bản để giữ số 0 ở đầu."],
+    ["4. Cột \"Danh sách\" để trống thì toàn bộ người trong file vào danh sách bạn gõ ở ô \"Tên danh sách\" trên web. Điền tên danh sách ở từng dòng nếu muốn chia nhiều danh sách trong một file."],
+    ["5. Trên web: chọn file ở mục Nhập từ Excel/CSV rồi bấm Nhập. File chỉ được đọc trong trình duyệt của bạn."]]);
+  gd["!cols"] = [{wch: 120}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Danh sách liên hệ"); XLSX.utils.book_append_sheet(wb, gd, "Hướng dẫn");
+  XLSX.writeFile(wb, "mau_danh_sach_lien_he.xlsx");
+  toast("Đã tạo file Excel mẫu. Điền xong, chọn file ở mục Nhập từ Excel/CSV.", "ok");
+}
+function expContacts() {
+  if (!xlsxOk()) return;
+  const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
+  if (!r.length) return toast("Chưa có liên hệ nào để xuất.", "err");
+  const ws = XLSX.utils.json_to_sheet(r.map(c => ({"Email": c.email, "Họ và tên": c.name || "", "Giới tính": c.gender || "", "Chức vụ": c.title || "", "SĐT": c.phone || "", "Đơn vị công tác": c.org || "", "Địa chỉ": c.addr || "", "Danh sách": c.list, "Trạng thái": c.unsub ? "Đã hủy đăng ký" : "Đang nhận"})));
+  ws["!cols"] = [30, 22, 11, 20, 14, 28, 40, 18, 16].map(wch => ({wch}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Liên hệ");
+  const slug = hnorm(cur.list).replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "tat_ca";
+  XLSX.writeFile(wb, `lien_he_${slug}_${today()}.xlsx`);
+  toast(`Đã xuất ${r.length} liên hệ ra file Excel.`, "ok");
+}
+async function addContact() {
+  const G = [["", "(chưa rõ)"], ["Nam", "Nam"], ["Nữ", "Nữ"], ["Khác", "Khác"]];
+  const f = await formDlg("Thêm liên hệ", [{k: "email", label: "Email", ph: "ten@gmail.com"}, {k: "name", label: "Họ và tên"}, {k: "gender", label: "Giới tính", val: "", options: G},
+    {k: "title", label: "Chức vụ"}, {k: "phone", label: "SĐT"}, {k: "org", label: "Đơn vị công tác"}, {k: "addr", label: "Địa chỉ"},
+    {k: "list", label: "Danh sách (gõ tên mới nếu chưa có)", val: cur.list || "Chung"}], "Thêm");
+  if (!f) return;
+  const email = f.email.toLowerCase(), list = (f.list || "Chung").slice(0, 80);
+  if (!isMail(email)) return toast("Email không hợp lệ.", "err");
+  if (f.phone && !/^[\d\s().+\-]{6,30}$/.test(f.phone)) return toast("SĐT không hợp lệ (chỉ gồm số, dấu cách, + - ( ) .).", "err");
+  if (D.contacts.some(x => x.email == email && x.list == list)) return toast(`Danh sách "${list}" đã có email này. Dùng nút Sửa để cập nhật thông tin.`, "err");
+  const c = {id: uid(), email, name: f.name.slice(0, 120), list, u: Date.now()};
+  for (const k of CF) if (f[k]) c[k] = f[k].slice(0, CFMAX[k]);
+  D.contacts.push(c); save(); csync(); go();
+  alert("Đã thêm liên hệ." + (ME && ME.role != "admin" ? " Liên hệ này chờ quản trị viên duyệt mới lên Kho chung." : ""));
+}
 /* Tự đồng bộ Kho chung, lưu khi rời trang, cảnh báo khi đang gửi */
 const canAuto = () => D && !RUN && !document.hidden && getCloud() && TOK && Date.now() < EXP - 60000;
 setInterval(() => { if (canAuto()) cloudSync(); }, 120000);
