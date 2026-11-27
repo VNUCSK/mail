@@ -222,20 +222,20 @@ const lists = () => [...new Set(D.contacts.map(c => c.list))];
 const mk = e => D.set.mask === false ? e : String(e).replace(/^(.{1,2}).*(@.*)$/, "$1•••$2");
 function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
-  return `<h2>Liên hệ</h2>${contactNote()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
+  return `<h2>Liên hệ</h2>${contactNote()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). Nếu dòng đầu có tiêu đề cột như Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị công tác, Địa chỉ thì web tự nhận các cột đó. File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
     <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
-    ${cur.list ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
-    <p class=m>Hiển thị tối đa 300 dòng${D.set.mask === false ? "" : "; email được ẩn một phần (đổi trong Cài đặt)"}.</p><table><tr><th>Email<th>Tên<th>Danh sách<th>Trạng thái<th></tr>
-    ${r.slice(0, 300).map(c => `<tr><td>${esc(mk(c.email))}<td>${esc(c.name)}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}${PEND.keys.has(c.list + "|" + c.email) ? ` <span class="tag wait">Chờ duyệt</span>` : ""}
-    <td style="white-space:nowrap"><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button> <button class=g onclick="editContact('${c.id}')">Sửa</button> <button class=g onclick="delContact('${c.id}')">Xóa</button></tr>`).join("")}</table>`;
+    ${cur.list && (!ME || ME.role == "admin") ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
+    <p class=m>Hiển thị tối đa 300 dòng${D.set.mask === false ? "" : "; email được ẩn một phần (đổi trong Cài đặt)"}.</p><div style="overflow-x:auto"><table><tr><th>Email<th>Tên<th>Giới tính<th>Chức vụ<th>Đơn vị<th>SĐT<th>Địa chỉ<th>Danh sách<th>Trạng thái<th></tr>
+    ${r.slice(0, 300).map(c => `<tr><td>${esc(mk(c.email))}<td>${esc(c.name)}<td>${esc(c.gender || "")}<td>${esc(c.title || "")}<td>${esc(c.org || "")}<td>${esc(mkp(c.phone))}<td>${esc((c.addr || "").slice(0, 40))}${(c.addr || "").length > 40 ? "…" : ""}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}${PEND.keys.has(c.list + "|" + c.email) ? ` <span class="tag wait">Chờ duyệt</span>` : ""}
+    <td style="white-space:nowrap"><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button> <button class=g onclick="editContact('${c.id}')">Sửa</button> ${canDel(c) ? `<button class=g onclick="delContact('${c.id}')">${ME && ME.role != "admin" ? "Bỏ" : "Xóa"}</button>` : ""}</tr>`).join("")}</table></div>`;
 }
 /* ---------- Kho chung Cloudflare ---------- */
 let CSTAT = "", CBUSY = 0, CT;
 const CST = t => { CSTAT = t; const e = $("#cst"); if (e) e.textContent = /^Chưa/.test(t) ? "⚠ " + t : ""; }; // chỉ hiện khi lỗi
 const csync = () => { if (!getCloud()) return; clearTimeout(CT); CT = setTimeout(() => cloudSync(), 1500); };
-const slim = () => D.contacts.map(({email, name, list, unsub, u}) => ({email, name: name || "", list, ...(unsub ? {unsub: true} : {}), u: u || 0}));
-const norm = a => JSON.stringify((a || []).map(({email, name, list, unsub, u}) => [list, email, name || "", unsub ? 1 : 0, u || 0]).sort((x, y) => (x[0] + "|" + x[1]).localeCompare(y[0] + "|" + y[1])));
+const slim = () => D.contacts.map(c => ({email: c.email, name: c.name || "", list: c.list, ...(c.unsub ? {unsub: true} : {}), ...xf(c), u: c.u || 0}));
+const norm = a => JSON.stringify((a || []).map(c => [c.list, c.email, c.name || "", c.unsub ? 1 : 0, c.u || 0, ...CF.map(k => c[k] || "")]).sort((x, y) => (x[0] + "|" + x[1]).localeCompare(y[0] + "|" + y[1])));
 function mergeIn(R) {
   const m = new Map();
   for (const c of [...D.contacts, ...(R.contacts || [])]) {
@@ -265,6 +265,7 @@ async function cloudSync(manual) {
     let r = await cfetch("GET"), R = r.data; const n0 = D.contacts.length, p0 = PEND.n, member = ME && ME.role != "admin";
     mergeIn(R); D.rev = R.rev || 0;
     if (member) {
+      SHKEYS = new Set((R.contacts || []).map(ckey));
       if (R.rej) { noteRej(); toast("Quản trị viên đã từ chối dữ liệu liên hệ bạn gửi. Dữ liệu đó vẫn dùng được trên máy bạn nhưng sẽ không lên Kho chung.", "err"); }
       await propose(R);
     } else for (let i = 0; i < 3; i++) {
@@ -280,32 +281,54 @@ async function cloudSync(manual) {
 }
 function tg(id) { const c = D.contacts.find(x => x.id == id); c.unsub = !c.unsub; c.u = Date.now(); save(); csync(); go(); }
 async function delList() {
+  if (ME && ME.role != "admin") return toast("Chỉ quản trị viên được xóa danh sách liên hệ.", "err");
   if (!cur.list || !(await ask(`Xóa toàn bộ danh sách "${cur.list}" (${D.contacts.filter(c => c.list == cur.list).length} email)?`, "Xóa danh sách", 1))) return;
   (D.del ||= {})[cur.list] = Date.now(); D.contacts = D.contacts.filter(c => c.list != cur.list); cur.list = ""; save(); csync(); go();
 }
+const HDR = [["email", /^(e-?mail|thu dien tu|gmail|dia chi e-?mail)$/], ["name", /^(ho va ten|ho ten|ten|name|full ?name|ten nguoi nhan)$/], ["gender", /gioi ?tinh|^gender$|^sex$/], ["title", /chuc ?vu|chuc ?danh|^position$|^title$/], ["phone", /^(sdt|so dien thoai|dien thoai|phone|mobile|tel|so dt)/], ["org", /don ?vi|co ?quan|to ?chuc|cong ?ty|^organi[sz]ation$|^company$/], ["addr", /^dia ?chi$|^address$/]];
+const hnorm = x => String(x ?? "").toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+const gnorm = x => { const v = hnorm(x); return /^(nam|male|m|ong|anh)$/.test(v) ? "Nam" : /^(nu|female|f|ba|chi)$/.test(v) ? "Nữ" : String(x || "").trim().slice(0, 20); };
 async function importFile(f, list) {
   const wb = f.name.toLowerCase().endsWith(".csv") ? XLSX.read(await f.text(), {type: "string"}) : XLSX.read(await f.arrayBuffer());
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: false});
-  const have = new Set(D.contacts.filter(c => c.list == list).map(c => c.email)), okName = x => x && !x.includes("@") && !/^\d+$/.test(x);
-  let add = 0, dup = 0, bad = 0;
-  for (const r of rows) {
-    const cells = (r || []).map(x => String(x ?? "").trim()), j = cells.findIndex(x => isMail(x.toLowerCase()));
-    if (j < 0) { if (cells.some(x => x.includes("@"))) bad++; continue; }
-    const e = cells[j].toLowerCase(), name = cells.slice(j + 1).find(okName) || cells.slice(0, j).find(okName) || "";
-    if (have.has(e)) { dup++; continue; }
-    have.add(e); D.contacts.push({id: uid(), email: e, name, list, u: Date.now()}); add++;
+  const have = new Map(D.contacts.filter(c => c.list == list).map(c => [c.email, c])), okName = x => x && !x.includes("@") && !/^\d+$/.test(x);
+  /* Nếu dòng tiêu đề có tên cột (Email, Họ tên, Giới tính, Chức vụ, SĐT, Đơn vị, Địa chỉ) thì nhận cột theo tiêu đề */
+  let hi = -1, cmap = null;
+  for (let i = 0; i < Math.min(rows.length, 10) && !cmap; i++) {
+    const m = {}; (rows[i] || []).forEach((x, j) => { const h = hnorm(x), k = HDR.find(([, re]) => re.test(h)); if (k && m[k[0]] == null) m[k[0]] = j; });
+    if (m.email != null && Object.keys(m).length >= 2) { cmap = m; hi = i; }
   }
-  return {add, dup, bad};
+  let add = 0, dup = 0, bad = 0, upd = 0;
+  for (const r of rows.slice(hi + 1)) {
+    const cells = (r || []).map(x => String(x ?? "").trim()); let e, name, ex = {};
+    if (cmap) {
+      const v = cells[cmap.email] || "";
+      if (!isMail(v.toLowerCase())) { if (cells.some(x => x.includes("@"))) bad++; continue; }
+      e = v.toLowerCase(); name = (cells[cmap.name] || "").slice(0, 120);
+      for (const k of CF) if (cmap[k] != null && cells[cmap[k]]) {
+        let v2 = cells[cmap[k]]; if (k == "gender") v2 = gnorm(v2); else if (k == "phone" && /^[1-9]\d{8}$/.test(v2)) v2 = "0" + v2;
+        ex[k] = v2.slice(0, CFMAX[k]);
+      }
+    } else {
+      const j = cells.findIndex(x => isMail(x.toLowerCase()));
+      if (j < 0) { if (cells.some(x => x.includes("@"))) bad++; continue; }
+      e = cells[j].toLowerCase(); name = cells.slice(j + 1).find(okName) || cells.slice(0, j).find(okName) || "";
+    }
+    const o = have.get(e);
+    if (o) { let ch = 0; if (!o.name && name) { o.name = name; ch = 1; } for (const k of CF) if (!o[k] && ex[k]) { o[k] = ex[k]; ch = 1; } if (ch) { o.u = Date.now(); upd++; } else dup++; continue; }
+    const c = {id: uid(), email: e, name, list, ...ex, u: Date.now()}; D.contacts.push(c); have.set(e, c); add++;
+  }
+  return {add, dup, bad, upd};
 }
 async function imp() {
   const f = $("#fi").files[0], list = $("#ln").value.trim() || "Chung";
   if (!f) return alert("Chọn file trước.");
-  const r = await importFile(f, list); save(); csync(); cur.list = list; alert(`Đã thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
+  const r = await importFile(f, list); save(); csync(); cur.list = list; alert(`Đã thêm ${r.add}, trùng ${r.dup}${r.upd ? ", bổ sung thông tin " + r.upd : ""}, email sai ${r.bad}.`); go();
 }
 async function impQuick() {
   const f = $("#qf").files[0]; if (!f) return alert("Chọn file Excel/CSV trước.");
   const list = f.name.replace(/\.[^.]+$/, "").slice(0, 40) || "Danh sách";
-  const r = await importFile(f, list); E().list = list; save(); csync(); alert(`Danh sách "${list}": thêm ${r.add}, trùng ${r.dup}, email sai ${r.bad}.`); go();
+  const r = await importFile(f, list); E().list = list; save(); csync(); alert(`Danh sách "${list}": thêm ${r.add}, trùng ${r.dup}${r.upd ? ", bổ sung thông tin " + r.upd : ""}, email sai ${r.bad}.`); go();
 }
 
 /* ---------- Trình soạn thư ---------- */
@@ -402,7 +425,7 @@ const TPL = [
     tx('<div style="text-align:center">Kính chúc <b>{{ten}}</b> và gia đình một năm mới tràn đầy sức khỏe, hạnh phúc và thành công.<br><br>Trân trọng cảm ơn sự đồng hành của quý khách.</div>', "#b71c1c"), ft("© Tên công ty", "#b71c1c", "#ffd54f")]},
   {n: "Thư công việc tối giản", th: {outer: "#ffffff", w: 600}, b: [tx("Chào <b>{{ten}}</b>,<br><br>Nội dung thư của bạn ở đây. Trình bày ngắn gọn, đi thẳng vào vấn đề.<br><br>Trân trọng,<br><b>Họ và tên</b><br><span style=\"color:#777\">Chức vụ · Công ty<br>Điện thoại · Email</span>")]}
 ];
-const prev = t => html({theme: Object.assign({}, THEME, t.th), blocks: t.b}, "preview").replace(/{{ten}}/g, "Nguyễn Văn A");
+const prev = t => html({theme: Object.assign({}, THEME, t.th), blocks: t.b}, "preview").replace(/{{ten}}/g, "Nguyễn Văn A").replace(/{{(chucvu|donvi|sdt|diachi|gioitinh)}}/g, (m, k) => SAMPLE[k]);
 function vTpl() {
   return `<h2>Mẫu thiết kế</h2>${sharedBox()}<h3 style="margin:22px 0 4px">Mẫu có sẵn</h3><div class=m>${E() ? `Bấm vào một mẫu để áp dụng cho thư "<b>${esc(E().name)}</b>".` : "Bấm vào một mẫu để tạo thư mới từ mẫu đó."} Sau đó bạn sửa chữ, màu, thêm ảnh và nút tùy ý.</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:10px">${TPL.map((t, i) => `<div onclick="useTpl(${i})" style="cursor:pointer;border:1px solid #ddd;border-radius:8px;overflow:hidden;background:#fff">
@@ -462,7 +485,7 @@ const fl = () => E().files.map((f, i) => `<div class=m>📎 ${esc(f.name)} (${Ma
 const add = t => { E().blocks.push({t, v: t == "r" ? "<div>Nội dung...</div>" : t == "btn" ? "Xem chi tiết" : "", u: ""}); save(); go(); };
 const mv = (i, d) => { const a = E().blocks, j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; save(); go(); };
 const rm = i => { E().blocks.splice(i, 1); save(); go(); };
-function upd(init) { if (!init) save(); const f = $("#pf"); if (f) f.srcdoc = html(E(), "preview").replace(/{{ten}}/g, "Nguyễn Văn A"); }
+function upd(init) { if (!init) save(); const f = $("#pf"); if (f) f.srcdoc = html(E(), "preview").replace(/{{ten}}/g, "Nguyễn Văn A").replace(/{{(chucvu|donvi|sdt|diachi|gioitinh)}}/g, (m, k) => SAMPLE[k]); }
 function newCamp(quiet) {
   cur.edit = fix({id: uid(), name: "Thư mới", subject: "", list: "", mode: "bcc", grp: 150, blocks: [{t: "r", v: '<div style="text-align:center"><b><span style="font-size:20px;color:#1f4fbf">TIÊU ĐỀ THƯ</span></b></div><div><br></div><div>Kính gửi: <b>{{ten}}</b>,</div><div><br></div><div>Nội dung thư...</div>'}]});
   D.camps.unshift(cur.edit); save(); if (!quiet) go("edit");
@@ -492,11 +515,13 @@ async function addFiles(fs, at) {
 function drop(e, at) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], at); }
 function pst(e, at) { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs, at); } }
 
-const lname = c => (c.list || "Tất cả") + (c.who == "pick" ? ` (chọn ${pend(c).length} người)` : "");
+const lname = c => (c.who == "extra" ? "Email nhập tay" : (c.list || "Tất cả")) + (c.who == "pick" || c.who == "extra" ? ` (chọn ${pend(c).length} người)` : "");
 const doneSet = c => new Set(D.sent.filter(s => s.cid == c.id && s.ok).map(s => s.email));
 const pend = c => {
   const done = doneSet(c), pk = new Set(c.pick || []), m = new Map();
-  D.contacts.filter(x => !x.unsub && (!c.list || x.list == c.list) && (c.who != "pick" || pk.has(x.email)) && !done.has(x.email)).forEach(x => m.has(x.email) || m.set(x.email, x));
+  (c.who == "extra" ? [] : D.contacts).filter(x => !x.unsub && (!c.list || x.list == c.list) && (c.who != "pick" || pk.has(x.email)) && !done.has(x.email)).forEach(x => m.has(x.email) || m.set(x.email, x));
+  const unsubs = new Set(D.contacts.filter(x => x.unsub).map(x => x.email));
+  (c.extra || []).forEach(x => !done.has(x.email) && !unsubs.has(x.email) && !m.has(x.email) && m.set(x.email, x));
   return [...m.values()];
 };
 const gsz = c => Math.min(500, Math.max(1, +c.grp || 150));
@@ -554,8 +579,9 @@ function vEdit() {
     <div class=fl>1. Danh sách</div>
     <select style="width:100%" onchange="E().list=this.value;save();go()"><option value="">Tất cả liên hệ (${D.contacts.filter(c => !c.unsub).length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == ed.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l && !c.unsub).length})</option>`).join("")}</select>
     <div class=fl>2. Gửi tới</div>
-    <div class=seg>${[["all", "Cả danh sách"], ["pick", "Chọn từng người"]].map(([v, l]) => `<button class="${v == ed.who ? "on" : ""}" onclick="E().who='${v}';save();go()">${l}</button>`).join("")}</div>
+    <div class=seg>${[["all", "Cả danh sách"], ["pick", "Chọn từng người"], ["extra", "Chỉ email nhập tay"]].map(([v, l]) => `<button class="${v == ed.who ? "on" : ""}" onclick="E().who='${v}';save();go()">${l}</button>`).join("")}</div>
     ${ed.who == "pick" ? pickBox() : ""}
+    ${extraBox(ed)}
     <div class=fl>3. Cách gửi</div>
     <div class=seg>${[["bcc", "Thư chung · BCC"], ["cc", "Thư chung · CC"], ["one", "Từng người một thư"]].map(([v, l]) => `<button class="${v == ed.mode ? "on" : ""}" onclick="E().mode='${v}';save();go()">${l}</button>`).join("")}</div>
     <div class=m>${HINT[ed.mode]}${ed.mode != "one" ? ` Tối đa <input type=number min=1 max=500 style="width:62px;padding:2px 5px" value=${ed.grp} onchange="E().grp=Math.min(500,Math.max(1,+this.value||150));save();go()"> người/thư.` : ""}</div>
@@ -565,7 +591,7 @@ function vEdit() {
     <div class=dz onclick="$('#fp').click()">Kéo ảnh hoặc tệp từ máy tính thả vào đây, hoặc bấm để chọn<br><span class=m>Ảnh thành khối ảnh trong thư. Tệp khác (PDF, Word...) thành tệp đính kèm.</span></div>
     <input type=file id=fp multiple hidden onchange="addFiles([...this.files]);this.value=''">${fl()}
     ${blk()}<p><button class=g onclick="add('r')">+ Văn bản</button> <button class=g onclick="add('btn')">+ Nút bấm</button> <button class=g onclick="add('hr')">+ Đường kẻ</button> <button class=g onclick="$('#fp').click()">+ Ảnh</button></p></div></div>
-    <div class=prev><b>Xem trước</b> <span class=m>({{ten}} sẽ được thay bằng tên người nhận)</span><iframe id=pf></iframe></div></div>`;
+    <div class=prev><b>Xem trước</b> <span class=m>({{ten}}, {{chucvu}}, {{donvi}}, {{sdt}}, {{diachi}}, {{gioitinh}} sẽ được thay bằng thông tin của người nhận)</span><iframe id=pf></iframe></div></div>`;
 }
 function vSet() {
   const s = D.set;
@@ -610,13 +636,16 @@ async function gsend(raw) {
   } catch (e) { throw new Error("Mất kết nối khi gửi. Thư có thể đã được gửi, hãy kiểm tra mục Thư đã gửi của Gmail trước khi gửi lại."); }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || "HTTP " + r.status);
 }
+const PHK = {chucvu: "title", donvi: "org", sdt: "phone", diachi: "addr", gioitinh: "gender"}, PHX = /{{(chucvu|donvi|sdt|diachi|gioitinh)}}/g;
+const SAMPLE = {chucvu: "Giám đốc", donvi: "Công ty ABC", sdt: "0901 234 567", diachi: "Hà Nội", gioitinh: "Nam"};
 function personal(c, x) {
-  return [(c.subject || "(Không tiêu đề)").replace(/{{ten}}/g, x.name || "bạn"), html(c, "mail").replace(/{{ten}}/g, esc(x.name) || "bạn")];
+  return [(c.subject || "(Không tiêu đề)").replace(/{{ten}}/g, x.name || "bạn").replace(PHX, (m, k) => x[PHK[k]] || ""),
+    html(c, "mail").replace(/{{ten}}/g, esc(x.name) || "bạn").replace(PHX, (m, k) => esc(x[PHK[k]] || ""))];
 }
 let TESTING = 0;
 async function test() {
   const c = E(); if (!c.subject) return alert("Nhập tiêu đề trước."); if (TESTING) return; TESTING = 1;
-  try { const [s, h] = personal(c, {name: "Thử nghiệm"}, "test"); await gsend(mime(`<${U.email}>`, s, h, await assets(c))); alert("Đã gửi thử vào hộp thư của bạn."); }
+  try { const [s, h] = personal(c, {name: "Thử nghiệm", gender: SAMPLE.gioitinh, title: SAMPLE.chucvu, org: SAMPLE.donvi, phone: SAMPLE.sdt, addr: SAMPLE.diachi}, "test"); await gsend(mime(`<${U.email}>`, s, h, await assets(c))); alert("Đã gửi thử vào hộp thư của bạn."); }
   catch (e) { alert("Lỗi: " + e.message); }
   TESTING = 0;
 }
@@ -675,8 +704,12 @@ function exp() {
   const rows = D.sent.map(s => ({"Thư": nm(s.cid), Email: s.email, "Tên": s.name, "Trạng thái": s.ok ? "Đã gửi" : "Lỗi", "Lỗi": s.err || "", "Thời gian gửi": s.at, "Thư số": s.batch}));
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lịch sử"); XLSX.writeFile(wb, "lich_su_gui_mail.xlsx");
 }
+/* ---------- Thông tin mở rộng của liên hệ ---------- */
+const CF = ["gender", "title", "phone", "org", "addr"], CFMAX = {gender: 20, title: 100, phone: 30, org: 150, addr: 250};
+const xf = c => Object.fromEntries(CF.filter(k => c[k]).map(k => [k, String(c[k]).slice(0, CFMAX[k])]));
+const mkp = p => !p ? "" : D.set.mask === false ? p : String(p).replace(/^(.{0,3}).*(.{3})$/, "$1•••$2");
 /* ---------- Quản trị: phân quyền Admin, duyệt tài khoản, mẫu thư chung (cần Worker hỗ trợ) ---------- */
-let ME = null, USERS = [], PROPS = [], PEND = {keys: new Set(), n: 0}, LASTSIG = "", PENDN = 0, SHARED = [], SHCACHE = {};
+let ME = null, USERS = [], PROPS = [], PEND = {keys: new Set(), n: 0}, SHKEYS = null, LASTSIG = "", PENDN = 0, SHARED = [], SHCACHE = {};
 async function api(method, path, body) {
   const t = await getTok();
   let r;
@@ -725,7 +758,7 @@ function formDlg(title, fields, ok) {
   return new Promise(res => {
     const ov = document.createElement("div"); ov.className = "ov";
     ov.innerHTML = `<div class=dlg role=dialog aria-modal=true><div class=dm style="font-weight:700"></div><div class=ff></div><div class=db style="margin-top:14px"><button class=g data-x=0>Hủy</button><button data-x=1>${esc(ok || "Lưu")}</button></div></div>`;
-    ov.querySelector(".dm").textContent = title;
+    ov.querySelector(".dm").textContent = title; ov.querySelector(".dlg").style.cssText += ";max-height:90vh;overflow:auto";
     ov.querySelector(".ff").innerHTML = fields.map(f => `<div class=fl>${esc(f.label)}</div>` + (f.options
       ? `<select data-k="${f.k}" style="width:100%" ${f.dis ? "disabled" : ""}>${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v == f.val ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`
       : `<input data-k="${f.k}" style="width:100%" value="${esc(f.val || "")}" placeholder="${esc(f.ph || "")}" ${f.dis ? "disabled" : ""}>`)).join("");
@@ -880,13 +913,14 @@ const smap = o => JSON.stringify(Object.entries(o || {}).sort());
 const ckey = c => c.list + "|" + c.email;
 function diffVs(R) {
   const rmap = new Map((R.contacts || []).map(c => [ckey(c), c])), N = D.nope || {c: {}, d: {}, r: {}}, up = [], del = {}, rm = {};
-  for (const c of D.contacts) { const k = ckey(c), r = rmap.get(k); if ((!r || (c.u || 0) > (r.u || 0)) && N.c[k] !== (c.u || 0)) up.push({email: c.email, name: c.name || "", list: c.list, ...(c.unsub ? {unsub: true} : {}), u: c.u || 0}); }
+  for (const c of D.contacts) { const k = ckey(c), r = rmap.get(k); if ((!r || (c.u || 0) > (r.u || 0)) && N.c[k] !== (c.u || 0)) up.push({email: c.email, name: c.name || "", list: c.list, ...(c.unsub ? {unsub: true} : {}), ...xf(c), u: c.u || 0}); }
   for (const [l, t] of Object.entries(D.del || {})) if (t > ((R.del || {})[l] || 0) && N.d[l] !== t) del[l] = t;
   for (const [k, t] of Object.entries(D.rm || {})) if (t > ((R.rm || {})[k] || 0) && N.r[k] !== t) rm[k] = t;
   return {up, del, rm};
 }
 async function propose(R) {
-  const {up, del, rm} = diffVs(R), n = up.length + Object.keys(del).length + Object.keys(rm).length;
+  /* Tài khoản thường chỉ được thêm và sửa thông tin, không được xóa: không gửi lệnh xóa lên */
+  const up = diffVs(R).up, del = {}, rm = {}, n = up.length;
   PEND = {keys: new Set(up.map(ckey)), n};
   if (!n) { if (R.pend) await api("POST", "/contacts/proposal", {upsert: [], del: {}, rm: {}}); LASTSIG = ""; return; }
   const sig = JSON.stringify([up, del, rm]);
@@ -896,24 +930,59 @@ async function propose(R) {
 }
 /* Admin từ chối: các thay đổi đó vẫn dùng được trên máy này nhưng không gửi lên Kho chung nữa */
 function noteRej() { const n = D.nope ||= {c: {}, d: {}, r: {}}, l = D.lastp; if (l) { Object.assign(n.c, l.c); Object.assign(n.d, l.d); Object.assign(n.r, l.r); } LASTSIG = ""; save(); }
-const contactNote = () => ME && ME.role != "admin" && getCloud() ? `<div class=card style="background:#fff8e1">${PEND.n ? `Có <b>${PEND.n}</b> thay đổi đang chờ quản trị viên duyệt. Danh sách của bạn vẫn dùng được ngay trên máy này, nhưng chỉ lên Kho chung sau khi được duyệt.` : "Danh sách bạn nhập hoặc sửa dùng được ngay trên máy này, nhưng chỉ lên Kho chung sau khi quản trị viên duyệt."}</div>` : "";
+const contactNote = () => ME && ME.role != "admin" && getCloud() ? `<div class=card style="background:#fff8e1">Bạn có thể thêm liên hệ và sửa thông tin (tên, chức vụ, SĐT...). Mọi thay đổi chỉ lên Kho chung sau khi quản trị viên duyệt, và bạn không thể xóa liên hệ đã có trong Kho chung. ${PEND.n ? `Hiện có <b>${PEND.n}</b> thay đổi đang chờ duyệt. ` : ""}Muốn gửi thư cho email khác mà không lưu, hãy nhập email ở bước <b>Gửi tới</b> khi soạn thư (không cần duyệt).</div>` : "";
+const canDel = c => !ME || ME.role == "admin" || !!(SHKEYS && !SHKEYS.has(ckey(c)));
 async function editContact(id) {
   const c = D.contacts.find(x => x.id == id); if (!c) return;
-  const f = await formDlg("Sửa thông tin liên hệ", [{k: "email", label: "Email", val: c.email}, {k: "name", label: "Tên", val: c.name || ""}, {k: "list", label: "Danh sách", val: c.list}], "Lưu");
+  const G = [["", "(chưa rõ)"], ["Nam", "Nam"], ["Nữ", "Nữ"], ["Khác", "Khác"]]; if (c.gender && !G.some(g => g[0] == c.gender)) G.push([c.gender, c.gender]);
+  const priv = ME && ME.role != "admin";
+  const f = await formDlg("Sửa thông tin liên hệ", [{k: "email", label: priv ? "Email (chỉ quản trị viên được đổi)" : "Email", val: c.email, dis: priv}, {k: "name", label: "Họ và tên", val: c.name || ""},
+    {k: "gender", label: "Giới tính", val: c.gender || "", options: G}, {k: "title", label: "Chức vụ", val: c.title || ""}, {k: "phone", label: "SĐT", val: c.phone || ""},
+    {k: "org", label: "Đơn vị công tác", val: c.org || ""}, {k: "addr", label: "Địa chỉ", val: c.addr || ""}, {k: "list", label: priv ? "Danh sách (chỉ quản trị viên được đổi)" : "Danh sách", val: c.list, dis: priv}], "Lưu");
   if (!f) return;
-  const email = f.email.toLowerCase(), list = f.list || "Chung";
+  const email = priv ? c.email : f.email.toLowerCase(), list = priv ? c.list : (f.list || "Chung");
   if (!isMail(email)) return toast("Email không hợp lệ.", "err");
+  if (f.phone && !/^[\d\s().+\-]{6,30}$/.test(f.phone)) return toast("SĐT không hợp lệ (chỉ gồm số, dấu cách, + - ( ) .).", "err");
   if (D.contacts.some(x => x.id != c.id && x.email == email && x.list == list)) return toast(`Danh sách "${list}" đã có email này.`, "err");
   const old = ckey(c), now = Date.now();
   if (email != c.email || list != c.list) (D.rm ||= {})[old] = now;
-  Object.assign(c, {email, name: f.name, list, u: now}); save(); csync(); go();
+  Object.assign(c, {email, name: f.name, list, u: now});
+  for (const k of CF) { if (f[k]) c[k] = f[k].slice(0, CFMAX[k]); else delete c[k]; }
+  save(); csync(); go();
   alert("Đã lưu thông tin liên hệ.");
 }
 async function delContact(id) {
-  const c = D.contacts.find(x => x.id == id);
-  if (!c || !(await ask(`Xóa ${c.email} khỏi danh sách "${c.list}"?` + (ME && ME.role != "admin" ? "\nVới tài khoản của bạn, việc xóa trên Kho chung cần quản trị viên duyệt." : ""), "Xóa", 1))) return;
+  const c = D.contacts.find(x => x.id == id); if (!c) return;
+  if (!canDel(c)) return toast("Chỉ quản trị viên được xóa liên hệ khỏi Kho chung.", "err");
+  if (ME && ME.role != "admin") {   /* liên hệ tự thêm, chưa được duyệt lên Kho chung: được bỏ khỏi máy mình */
+    if (!(await ask(`Bỏ ${c.email} khỏi máy bạn? Liên hệ này chưa có trong Kho chung nên không cần quản trị viên duyệt.`, "Bỏ liên hệ", 1))) return;
+    D.contacts = D.contacts.filter(x => x.id != id); save(); csync(); go(); return;
+  }
+  if (!(await ask(`Xóa ${c.email} khỏi danh sách "${c.list}"?`, "Xóa", 1))) return;
   (D.rm ||= {})[ckey(c)] = Date.now(); D.contacts = D.contacts.filter(x => x.id != id); save(); csync(); go();
 }
+/* ----- Gửi cho email nhập tay: chỉ dùng cho thư này, không lưu vào Liên hệ nên không cần duyệt ----- */
+function parseExtra(txt) {
+  const out = [];
+  for (const part of String(txt || "").split(/[\n,;]+/)) {
+    const t = part.trim(); if (!t) continue;
+    const m = t.match(/^(.*?)\s*<([^<>\s]+)>$/), email = (m ? m[2] : t).toLowerCase().trim();
+    out.push(isMail(email) ? {email, name: m ? m[1].replace(/^["']|["']$/g, "").trim().slice(0, 120) : ""} : {bad: t});
+  }
+  return out;
+}
+function addExtra() {
+  const e = E(), box = $("#ex"); if (!box || !box.value.trim()) return toast("Nhập ít nhất một email.", "err");
+  const items = parseExtra(box.value), ok = items.filter(x => x.email), bad = items.length - ok.length, have = new Set((e.extra ||= []).map(x => x.email)); let add = 0;
+  for (const x of ok) if (!have.has(x.email) && e.extra.length < 2000) { e.extra.push({email: x.email, name: x.name}); have.add(x.email); add++; }
+  save(); go();
+  alert(`Đã thêm ${add} email nhập tay${ok.length - add ? ", trùng " + (ok.length - add) : ""}${bad ? ", sai định dạng " + bad : ""}. Các email này chỉ dùng cho thư này, không lưu vào Liên hệ.`);
+}
+function delExtra(i) { const e = E(); (e.extra ||= []).splice(i, 1); save(); go(); }
+const extraBox = ed => `<div class=fl>➕ Gửi thêm tới email khác <span class=m>(chỉ dùng cho thư này, không lưu vào Liên hệ nên không cần quản trị viên duyệt)</span></div>
+    <textarea id=ex rows=2 style="width:100%" placeholder="ten@gmail.com, Nguyễn Văn A &lt;a@b.com&gt; ... (cách nhau bằng dấu phẩy hoặc xuống dòng)"></textarea>
+    <div><button class=g onclick=addExtra()>Thêm vào thư</button> ${(ed.extra || []).length ? `<span class=m>Đang có ${ed.extra.length} email nhập tay</span>` : ""}</div>
+    ${(ed.extra || []).length ? `<div style="margin-top:6px;max-height:110px;overflow:auto">${ed.extra.slice(0, 100).map((x, i) => `<span class=chip>${esc(mk(x.email))} <a href="#" onclick="delExtra(${i});return false">✕</a></span> `).join("")}${ed.extra.length > 100 ? `<span class=m>... và ${ed.extra.length - 100} email nữa</span>` : ""}</div>` : ""}`;
 /* ----- Admin duyệt dữ liệu liên hệ ----- */
 const propSum = x => [x.add && `thêm <b>${x.add}</b> liên hệ`, x.mod && `sửa <b>${x.mod}</b>`, x.del && `xóa <b>${x.del}</b> danh sách`, x.rm && `xóa <b>${x.rm}</b> liên hệ`].filter(Boolean).join(", ") || "không có thay đổi";
 async function propView(i) {
