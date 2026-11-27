@@ -65,6 +65,7 @@ aside .me{margin-top:auto}
 #tbx .cl{display:flex;align-items:center;gap:6px;color:#e6e1da;font-size:13px;background:#ffffff12;border-radius:4px;padding:3px 8px}
 @media(max-width:700px){aside{position:static;height:auto;width:100%}#tbx{width:100%}}
 .tag.no{background:#fde0e0;color:#a11}
+.tag.wait{background:#fff0c2;color:#7a5a00}
 </style>
 </head>
 <body>
@@ -221,13 +222,13 @@ const lists = () => [...new Set(D.contacts.map(c => c.list))];
 const mk = e => D.set.mask === false ? e : String(e).replace(/^(.{1,2}).*(@.*)$/, "$1•••$2");
 function vContacts() {
   const r = D.contacts.filter(c => !cur.list || c.list == cur.list);
-  return `<h2>Liên hệ</h2><div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
+  return `<h2>Liên hệ</h2>${contactNote()}<div class=card><b>Nhập từ Excel/CSV</b> <span class=m>(mỗi dòng có 1 email, tên nếu có để ở ô bên cạnh). File chỉ được đọc ngay trong trình duyệt, không tải lên máy chủ nào.</span><br>
     <input id=ln placeholder="Tên danh sách" value="${esc(cur.list || "Chung")}"> <input type=file id=fi accept=".xlsx,.xls,.csv"> <button onclick=imp()>Nhập</button></div>
     <select onchange="cur.list=this.value;go()"><option value="">Tất cả (${D.contacts.length})</option>${lists().map(l => `<option value="${esc(l)}" ${l == cur.list ? "selected" : ""}>${esc(l)} (${D.contacts.filter(c => c.list == l).length})</option>`).join("")}</select>
     ${cur.list ? `<button class=g onclick=delList()>Xóa danh sách này</button>` : ""}
     <p class=m>Hiển thị tối đa 300 dòng${D.set.mask === false ? "" : "; email được ẩn một phần (đổi trong Cài đặt)"}.</p><table><tr><th>Email<th>Tên<th>Danh sách<th>Trạng thái<th></tr>
-    ${r.slice(0, 300).map(c => `<tr><td>${esc(mk(c.email))}<td>${esc(c.name)}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}
-    <td><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button></tr>`).join("")}</table>`;
+    ${r.slice(0, 300).map(c => `<tr><td>${esc(mk(c.email))}<td>${esc(c.name)}<td>${esc(c.list)}<td>${c.unsub ? "Đã hủy đăng ký" : "Đang nhận"}${PEND.keys.has(c.list + "|" + c.email) ? ` <span class="tag wait">Chờ duyệt</span>` : ""}
+    <td style="white-space:nowrap"><button class=g onclick="tg('${c.id}')">${c.unsub ? "Khôi phục" : "Hủy đăng ký"}</button> <button class=g onclick="editContact('${c.id}')">Sửa</button> <button class=g onclick="delContact('${c.id}')">Xóa</button></tr>`).join("")}</table>`;
 }
 /* ---------- Kho chung Cloudflare ---------- */
 let CSTAT = "", CBUSY = 0, CT;
@@ -242,7 +243,8 @@ function mergeIn(R) {
     if (!o || (c.u || 0) > (o.u || 0)) m.set(k, {...c, id: o?.id || c.id || uid()});
   }
   const del = {...(D.del || {})}; for (const [l, t] of Object.entries(R.del || {})) del[l] = Math.max(del[l] || 0, t);
-  D.del = del; D.contacts = [...m.values()].filter(c => !(del[c.list] && (c.u || 0) <= del[c.list]));
+  const rm = {...(D.rm || {})}; for (const [k, t] of Object.entries(R.rm || {})) rm[k] = Math.max(rm[k] || 0, t);
+  D.del = del; D.rm = rm; D.contacts = [...m.values()].filter(c => !(del[c.list] && (c.u || 0) <= del[c.list]) && !(rm[c.list + "|" + c.email] && (c.u || 0) <= rm[c.list + "|" + c.email]));
 }
 async function cfetch(method, body) {
   const t = await getTok();
@@ -260,16 +262,19 @@ async function cfetch(method, body) {
 async function cloudSync(manual) {
   if (!getCloud() || !D || CBUSY) return; CBUSY = 1; CST("Đang đồng bộ...");
   try {
-    let r = await cfetch("GET"), R = r.data; const n0 = D.contacts.length;
+    let r = await cfetch("GET"), R = r.data; const n0 = D.contacts.length, p0 = PEND.n, member = ME && ME.role != "admin";
     mergeIn(R); D.rev = R.rev || 0;
-    for (let i = 0; i < 3; i++) {
-      if (norm(D.contacts) == norm(R.contacts) && JSON.stringify(D.del || {}) == JSON.stringify(R.del || {})) break;
-      r = await cfetch("PUT", {contacts: slim(), del: D.del || {}, rev: D.rev});
+    if (member) {
+      if (R.rej) { noteRej(); toast("Quản trị viên đã từ chối dữ liệu liên hệ bạn gửi. Dữ liệu đó vẫn dùng được trên máy bạn nhưng sẽ không lên Kho chung.", "err"); }
+      await propose(R);
+    } else for (let i = 0; i < 3; i++) {
+      if (norm(D.contacts) == norm(R.contacts) && smap(D.del) == smap(R.del) && smap(D.rm) == smap(R.rm)) break;
+      r = await cfetch("PUT", {contacts: slim(), del: D.del || {}, rm: D.rm || {}, rev: D.rev});
       if (!r.conflict) { D.rev = r.data.rev; break; }
       R = r.data; mergeIn(R); D.rev = R.rev || 0;
     }
-    save(); CST(`Đã đồng bộ ${D.contacts.length} liên hệ lúc ${new Date().toLocaleTimeString("vi")}.`);
-    if (tab == "contacts" && (manual || D.contacts.length != n0)) go();
+    save(); CST(`Đã đồng bộ ${D.contacts.length} liên hệ lúc ${new Date().toLocaleTimeString("vi")}.${PEND.n ? " " + PEND.n + " thay đổi chờ quản trị viên duyệt." : ""}`);
+    if (tab == "contacts" && (manual || D.contacts.length != n0 || PEND.n != p0)) go();
   } catch (e) { CST("Chưa đồng bộ được: " + (e.message || e)); }
   CBUSY = 0;
 }
@@ -671,7 +676,7 @@ function exp() {
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lịch sử"); XLSX.writeFile(wb, "lich_su_gui_mail.xlsx");
 }
 /* ---------- Quản trị: phân quyền Admin, duyệt tài khoản, mẫu thư chung (cần Worker hỗ trợ) ---------- */
-let ME = null, USERS = [], PENDN = 0, SHARED = [], SHCACHE = {};
+let ME = null, USERS = [], PROPS = [], PEND = {keys: new Set(), n: 0}, LASTSIG = "", PENDN = 0, SHARED = [], SHCACHE = {};
 async function api(method, path, body) {
   const t = await getTok();
   let r;
@@ -739,15 +744,20 @@ const fdt = s => s ? new Date(s).toLocaleString("vi") : "";
 const uenc = u => encodeURIComponent(u.email);
 function vUsers() { return `<h2>Quản lý tài khoản</h2><div id=ulist class=m>Đang tải...</div>`; }
 async function loadUsersView() {
-  try { USERS = (await api("GET", "/users")).users || []; PENDN = USERS.filter(u => u.status == "pending").length; renderUsers(); updBadge(); }
+  try { const [a, c] = await Promise.all([api("GET", "/users"), api("GET", "/proposals")]); USERS = a.users || []; PROPS = c.proposals || []; PENDN = USERS.filter(u => u.status == "pending").length + PROPS.length; renderUsers(); updBadge(); }
   catch (e) { const b = $("#ulist"); if (b) b.innerHTML = `<div class=card>Không tải được danh sách tài khoản: ${esc(e.message)}</div>`; }
 }
-function updBadge() { const b = $("#ub"); if (!b) return; const n = USERS.filter(u => u.status == "pending").length; b.textContent = n; b.style.display = n ? "inline-block" : "none"; }
+function updBadge() { const b = $("#ub"); if (!b) return; const n = USERS.filter(u => u.status == "pending").length + PROPS.length; b.textContent = n; b.style.display = n ? "inline-block" : "none"; }
 function renderUsers() {
   const b = $("#ulist"); if (!b) return;
   const P = USERS.filter(u => u.status == "pending"), A = USERS.filter(u => u.status != "pending");
   const stag = u => u.status == "active" ? `<span class="tag ok">Được dùng</span>` : `<span class="tag no">Bị từ chối</span>`;
-  b.innerHTML = `<div class=card><b>Chờ duyệt (${P.length})</b>
+  b.innerHTML = `<div class=card><b>Dữ liệu liên hệ chờ duyệt (${PROPS.length})</b>
+    ${PROPS.length ? `<table><tr><th>Người gửi<th>Nội dung thay đổi<th>Gửi lúc<th></tr>${PROPS.map((x, i) => `<tr><td>${esc(x.name)}<br><span class=m>${esc(x.email)}</span>
+      <td>${propSum(x)}<td>${esc(fdt(x.at))}
+      <td style="white-space:nowrap"><button class=g onclick="propView(${i})">Xem</button> <button onclick="propOk(${i})">Duyệt</button> <button class=g onclick="propNo(${i})">Từ chối</button></tr>`).join("")}</table>`
+      : `<div class=m style="margin-top:6px">Không có dữ liệu nào đang chờ. Khi tài khoản khác tải danh sách email lên hoặc sửa liên hệ, thay đổi sẽ hiện ở đây.</div>`}</div>
+    <div class=card><b>Chờ duyệt (${P.length})</b>
     ${P.length ? `<table><tr><th>Tên<th>Email<th>Gửi yêu cầu lúc<th></tr>${P.map(u => `<tr><td>${esc(u.name)}<td>${esc(u.email)}<td>${esc(fdt(u.addedAt))}
       <td style="white-space:nowrap"><button onclick="userOk(${USERS.indexOf(u)})">Duyệt</button> <button class=g onclick="userNo(${USERS.indexOf(u)})">Từ chối</button></tr>`).join("")}</table>`
       : `<div class=m style="margin-top:6px">Không có yêu cầu nào đang chờ. Khi có người đăng nhập bằng tài khoản mới, yêu cầu sẽ hiện ở đây.</div>`}</div>
@@ -792,9 +802,10 @@ async function userAdd() {
 async function pollPending(first) {
   if (ME?.role != "admin") return;
   try {
-    USERS = (await api("GET", "/users")).users || [];
-    const n = USERS.filter(u => u.status == "pending").length;
-    if (n && (first || n > PENDN)) toast(`Có ${n} tài khoản đang chờ bạn duyệt. Mở mục Tài khoản để xem.`, "info");
+    const [a, c] = await Promise.all([api("GET", "/users"), api("GET", "/proposals")]);
+    USERS = a.users || []; PROPS = c.proposals || [];
+    const nu = USERS.filter(u => u.status == "pending").length, n = nu + PROPS.length;
+    if (n && (first || n > PENDN)) toast(`Đang chờ bạn duyệt: ${nu ? nu + " tài khoản" : ""}${nu && PROPS.length ? " và " : ""}${PROPS.length ? PROPS.length + " lượt cập nhật dữ liệu liên hệ" : ""}. Mở mục Tài khoản để xem.`, "info");
     PENDN = n; updBadge(); if (tab == "users") renderUsers();
   } catch (e) {}
 }
@@ -863,6 +874,64 @@ async function delShared(id) {
 /* Báo lỗi chạy ngầm bằng thông báo nổi để không bị im lặng */
 addEventListener("error", e => { if (e.message && !/ResizeObserver/.test(e.message)) toast("Lỗi: " + e.message, "err"); });
 addEventListener("unhandledrejection", e => toast("Lỗi: " + (e.reason?.message || e.reason || "không rõ"), "err"));
+
+/* ---------- Liên hệ: sửa/xóa từng người, tài khoản thường gửi thay đổi chờ Admin duyệt ---------- */
+const smap = o => JSON.stringify(Object.entries(o || {}).sort());
+const ckey = c => c.list + "|" + c.email;
+function diffVs(R) {
+  const rmap = new Map((R.contacts || []).map(c => [ckey(c), c])), N = D.nope || {c: {}, d: {}, r: {}}, up = [], del = {}, rm = {};
+  for (const c of D.contacts) { const k = ckey(c), r = rmap.get(k); if ((!r || (c.u || 0) > (r.u || 0)) && N.c[k] !== (c.u || 0)) up.push({email: c.email, name: c.name || "", list: c.list, ...(c.unsub ? {unsub: true} : {}), u: c.u || 0}); }
+  for (const [l, t] of Object.entries(D.del || {})) if (t > ((R.del || {})[l] || 0) && N.d[l] !== t) del[l] = t;
+  for (const [k, t] of Object.entries(D.rm || {})) if (t > ((R.rm || {})[k] || 0) && N.r[k] !== t) rm[k] = t;
+  return {up, del, rm};
+}
+async function propose(R) {
+  const {up, del, rm} = diffVs(R), n = up.length + Object.keys(del).length + Object.keys(rm).length;
+  PEND = {keys: new Set(up.map(ckey)), n};
+  if (!n) { if (R.pend) await api("POST", "/contacts/proposal", {upsert: [], del: {}, rm: {}}); LASTSIG = ""; return; }
+  const sig = JSON.stringify([up, del, rm]);
+  if (sig == LASTSIG) return;
+  await api("POST", "/contacts/proposal", {upsert: up, del, rm});
+  LASTSIG = sig; D.lastp = {c: Object.fromEntries(up.map(c => [ckey(c), c.u])), d: del, r: rm};
+}
+/* Admin từ chối: các thay đổi đó vẫn dùng được trên máy này nhưng không gửi lên Kho chung nữa */
+function noteRej() { const n = D.nope ||= {c: {}, d: {}, r: {}}, l = D.lastp; if (l) { Object.assign(n.c, l.c); Object.assign(n.d, l.d); Object.assign(n.r, l.r); } LASTSIG = ""; save(); }
+const contactNote = () => ME && ME.role != "admin" && getCloud() ? `<div class=card style="background:#fff8e1">${PEND.n ? `Có <b>${PEND.n}</b> thay đổi đang chờ quản trị viên duyệt. Danh sách của bạn vẫn dùng được ngay trên máy này, nhưng chỉ lên Kho chung sau khi được duyệt.` : "Danh sách bạn nhập hoặc sửa dùng được ngay trên máy này, nhưng chỉ lên Kho chung sau khi quản trị viên duyệt."}</div>` : "";
+async function editContact(id) {
+  const c = D.contacts.find(x => x.id == id); if (!c) return;
+  const f = await formDlg("Sửa thông tin liên hệ", [{k: "email", label: "Email", val: c.email}, {k: "name", label: "Tên", val: c.name || ""}, {k: "list", label: "Danh sách", val: c.list}], "Lưu");
+  if (!f) return;
+  const email = f.email.toLowerCase(), list = f.list || "Chung";
+  if (!isMail(email)) return toast("Email không hợp lệ.", "err");
+  if (D.contacts.some(x => x.id != c.id && x.email == email && x.list == list)) return toast(`Danh sách "${list}" đã có email này.`, "err");
+  const old = ckey(c), now = Date.now();
+  if (email != c.email || list != c.list) (D.rm ||= {})[old] = now;
+  Object.assign(c, {email, name: f.name, list, u: now}); save(); csync(); go();
+  alert("Đã lưu thông tin liên hệ.");
+}
+async function delContact(id) {
+  const c = D.contacts.find(x => x.id == id);
+  if (!c || !(await ask(`Xóa ${c.email} khỏi danh sách "${c.list}"?` + (ME && ME.role != "admin" ? "\nVới tài khoản của bạn, việc xóa trên Kho chung cần quản trị viên duyệt." : ""), "Xóa", 1))) return;
+  (D.rm ||= {})[ckey(c)] = Date.now(); D.contacts = D.contacts.filter(x => x.id != id); save(); csync(); go();
+}
+/* ----- Admin duyệt dữ liệu liên hệ ----- */
+const propSum = x => [x.add && `thêm <b>${x.add}</b> liên hệ`, x.mod && `sửa <b>${x.mod}</b>`, x.del && `xóa <b>${x.del}</b> danh sách`, x.rm && `xóa <b>${x.rm}</b> liên hệ`].filter(Boolean).join(", ") || "không có thay đổi";
+async function propView(i) {
+  const x = PROPS[i]; if (!x) return;
+  try {
+    const p = (await api("GET", "/proposals/" + encodeURIComponent(x.email))).proposal;
+    const L = p.upsert.slice(0, 30).map(c => `• ${c.email}${c.name ? " (" + c.name + ")" : ""} → ${c.list}`);
+    const more = p.total - L.length, dl = Object.keys(p.del || {});
+    await dlg(`Dữ liệu của ${x.name} (${x.email})\n` + (L.length ? L.join("\n") : "(không thêm/sửa liên hệ nào)") + (more > 0 ? `\n... và ${more} liên hệ nữa` : "") + (dl.length ? `\nXóa cả danh sách: ${dl.join(", ")}` : "") + (p.rm.length ? `\nXóa ${p.rm.length} liên hệ lẻ` : ""), {ok: "Đóng"});
+  } catch (e) { toast("Lỗi: " + e.message, "err"); }
+}
+async function propDo(i, act, msg) {
+  const x = PROPS[i]; if (!x) return;
+  try { await api("POST", "/proposals/" + encodeURIComponent(x.email) + "/" + act); alert(msg); await loadUsersView(); if (act == "approve") cloudSync(true); }
+  catch (e) { toast("Lỗi: " + e.message, "err"); await loadUsersView(); }
+}
+const propOk = i => propDo(i, "approve", "Đã duyệt và đưa dữ liệu của " + (PROPS[i]?.name || "") + " lên Kho chung.");
+async function propNo(i) { const x = PROPS[i]; if (!x || !(await ask(`Từ chối dữ liệu của ${x.name} (${x.email})? Dữ liệu sẽ không được đưa lên Kho chung.`, "Từ chối", 1))) return; propDo(i, "reject", "Đã từ chối dữ liệu của " + x.name + "."); }
 /* Tự đồng bộ Kho chung, lưu khi rời trang, cảnh báo khi đang gửi */
 const canAuto = () => D && !RUN && !document.hidden && getCloud() && TOK && Date.now() < EXP - 60000;
 setInterval(() => { if (canAuto()) cloudSync(); }, 120000);
