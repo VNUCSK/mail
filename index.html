@@ -176,7 +176,7 @@ async function login() {
     ME = me0;
     if (ME && ME.status && ME.status != "active") {
       const T = TOK; TOK = null; EXP = 0; U = null; try { google.accounts.oauth2.revoke(T); } catch (x) {}
-      LOGINERR = ME.status == "pending" ? `Tài khoản ${p.email} chưa được duyệt. Yêu cầu đã gửi tới quản trị viên, bạn sẽ đăng nhập được sau khi được duyệt. Nếu bạn là quản trị viên: hãy kiểm tra biến ADMIN_EMAILS của Worker có đúng email ${p.email} không.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên.`;
+      LOGINERR = ME.status == "pending" ? `Tài khoản ${p.email} chưa được duyệt. Yêu cầu đã gửi tới quản trị viên, bạn sẽ đăng nhập được sau khi được duyệt. Nếu bạn là quản trị viên: hãy kiểm tra biến ADMIN_EMAILS của Worker có đúng email ${p.email} không.` : `Tài khoản ${p.email} không được cấp quyền sử dụng. Vui lòng liên hệ quản trị viên. (Nếu bạn là quản trị viên: hãy kiểm tra biến ADMIN_EMAILS của Worker có đúng email này không.)`;
       ME = null; return boot();
     }
     try { if (!ME) await cfetch("GET"); }
@@ -717,7 +717,7 @@ const CF = ["gender", "title", "phone", "org", "addr"], CFMAX = {gender: 20, tit
 const xf = c => Object.fromEntries(CF.filter(k => c[k]).map(k => [k, String(c[k]).slice(0, CFMAX[k])]));
 const mkp = p => !p ? "" : D.set.hide !== true ? p : String(p).replace(/^(.{0,3}).*(.{3})$/, "$1•••$2");
 /* ---------- Quản trị: phân quyền Admin, duyệt tài khoản, mẫu thư chung (cần Worker hỗ trợ) ---------- */
-let ME = null, USERS = [], PROPS = [], PEND = {keys: new Set(), n: 0}, SHKEYS = null, LASTSIG = "", PENDN = 0, SHARED = [], SHCACHE = {};
+let ME = null, USERS = [], PROPS = [], PEND = {keys: new Set(), n: 0}, CLOSED = true, SHKEYS = null, LASTSIG = "", PENDN = 0, SHARED = [], SHCACHE = {};
 async function api(method, path, body) {
   const t = await getTok();
   let r;
@@ -785,7 +785,7 @@ const fdt = s => s ? new Date(s).toLocaleString("vi") : "";
 const uenc = u => encodeURIComponent(u.email);
 function vUsers() { return `<h2>Quản lý tài khoản</h2><div id=ulist class=m>Đang tải...</div>`; }
 async function loadUsersView() {
-  try { const [a, c] = await Promise.all([api("GET", "/users"), api("GET", "/proposals")]); USERS = a.users || []; PROPS = c.proposals || []; PENDN = USERS.filter(u => u.status == "pending").length + PROPS.length; renderUsers(); updBadge(); }
+  try { const [a, c] = await Promise.all([api("GET", "/users"), api("GET", "/proposals")]); USERS = a.users || []; CLOSED = a.closed !== false; PROPS = c.proposals || []; PENDN = USERS.filter(u => u.status == "pending").length + PROPS.length; renderUsers(); updBadge(); }
   catch (e) { const b = $("#ulist"); if (b) b.innerHTML = `<div class=card>Không tải được danh sách tài khoản: ${esc(e.message)}</div>`; }
 }
 function updBadge() { const b = $("#ub"); if (!b) return; const n = USERS.filter(u => u.status == "pending").length + PROPS.length; b.textContent = n; b.style.display = n ? "inline-block" : "none"; }
@@ -800,7 +800,7 @@ function renderUsers() {
   const pendCard = P.length ? `<div class=card><b>Chờ duyệt (${P.length})</b>
     <table><tr><th>Tên<th>Email<th>Gửi yêu cầu lúc<th></tr>${P.map(u => `<tr><td>${esc(u.name)}<td>${esc(u.email)}<td>${esc(fdt(u.addedAt))}
       <td style="white-space:nowrap"><button onclick="userOk(${USERS.indexOf(u)})">Duyệt</button> <button class=g onclick="userNo(${USERS.indexOf(u)})">Từ chối</button></tr>`).join("")}</table></div>` : "";
-  b.innerHTML = dataCard + pendCard + `<div class=card><b>Tài khoản (${A.length})</b> <button onclick=userAdd()>+ Thêm tài khoản</button>
+  b.innerHTML = `<div class=card style="background:${CLOSED ? "#e8f5e9" : "#fff8e1"}">${CLOSED ? "🔒 <b>Chế độ đóng:</b> chỉ các tài khoản có trong danh sách bên dưới mới đăng nhập được. Mọi tài khoản khác, kể cả cùng đơn vị, đều bị chặn và không để lại yêu cầu nào. Muốn cấp quyền cho ai, bấm <b>+ Thêm tài khoản</b>." : "🔓 <b>Đang cho phép gửi yêu cầu:</b> tài khoản lạ đăng nhập sẽ vào mục Chờ duyệt. Muốn đóng hẳn, xóa biến ALLOW_REQUESTS trên Worker."}</div>` + dataCard + pendCard + `<div class=card><b>Tài khoản (${A.length})</b> <button onclick=userAdd()>+ Thêm tài khoản</button>
     <table><tr><th>Tên<th>Email<th>Quyền<th>Trạng thái<th>Đăng nhập gần nhất<th></tr>${A.map(u => { const i = USERS.indexOf(u), self = u.email == U.email;
       return `<tr><td>${esc(u.name)}${u.note ? `<br><span class=m>${esc(u.note)}</span>` : ""}<td>${esc(u.email)}<td>${u.role == "admin" ? "Quản trị viên" : "Thành viên"}<td>${stag(u)}<td>${esc(fdt(u.lastLogin))}
       <td style="white-space:nowrap"><button class=g onclick="userEdit(${i})">Sửa</button> ${u.fixed || self ? "" : `<button class=g onclick="userDel(${i})">Xóa</button>`}</tr>`; }).join("")}</table></div>`;
@@ -844,7 +844,7 @@ async function pollPending(first) {
   if (ME?.role != "admin") return;
   try {
     const [a, c] = await Promise.all([api("GET", "/users"), api("GET", "/proposals")]);
-    USERS = a.users || []; PROPS = c.proposals || [];
+    USERS = a.users || []; CLOSED = a.closed !== false; PROPS = c.proposals || [];
     const nu = USERS.filter(u => u.status == "pending").length, n = nu + PROPS.length;
     if (n && (first || n > PENDN)) toast(`Đang chờ bạn duyệt: ${nu ? nu + " tài khoản" : ""}${nu && PROPS.length ? " và " : ""}${PROPS.length ? PROPS.length + " lượt cập nhật dữ liệu liên hệ" : ""}. Mở mục Tài khoản để xem.`, "info");
     PENDN = n; updBadge(); if (tab == "users") renderUsers();
